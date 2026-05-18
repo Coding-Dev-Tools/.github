@@ -1,6 +1,6 @@
 ## DevForge
 
-11 developer CLI tools that catch problems before production. Open source, MIT licensed, AI-maintained.
+11 developer CLI tools that catch problems before production. Open source, MIT licensed.
 
 ### Tools
 
@@ -20,11 +20,11 @@
 
 ### Install
 
-`pip install git+https://github.com/Coding-Dev-Tools/revenueholdings.git`
+```pip install git+https://github.com/Coding-Dev-Tools/devforge.git```
 
 ### Links
 
-- [Website](https://coding-dev-tools.github.io/revenueholdings.dev/)
-- [Pricing](https://coding-dev-tools.github.io/revenueholdings.dev/pricing.html)
-- [Documentation](https://coding-dev-tools.github.io/revenueholdings.dev/docs.html)
-- [Blog](https://coding-dev-tools.github.io/revenueholdings.dev/blog.html)
+- [Website](https://coding-dev-tools.github.io/devforge.dev/)
+- [Pricing](https://coding-dev-tools.github.io/devforge.dev/pricing.html)
+- [Documentation](https://coding-dev-tools.github.io/devforge.dev/docs.html)
+- [Blog](https://coding-dev-tools.github.io/devforge.dev/blog.html)
