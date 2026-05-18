@@ -1,0 +1,83 @@
+# DevForge — Org-level Reusable Stale Issue & PR Management
+#
+# Call from any Coding-Dev-Tools repo:
+#
+#   name: Stale
+#   on:
+#     schedule:
+#       - cron: '30 1 * * *'
+#   jobs:
+#     stale:
+#       uses: Coding-Dev-Tools/.github/.github/workflows/stale.yml@main
+#       permissions:
+#         issues: write
+#         pull-requests: write
+
+name: Stale Issue & PR Manager
+
+on:
+  workflow_call:
+    inputs:
+      days-before-stale:
+        description: Days before an issue/PR is considered stale
+        type: number
+        required: false
+        default: 60
+      days-before-close:
+        description: Days after stale label before closing
+        type: number
+        required: false
+        default: 7
+      stale-issue-label:
+        description: Label applied to stale issues
+        type: string
+        required: false
+        default: stale
+      stale-pr-label:
+        description: Label applied to stale PRs
+        type: string
+        required: false
+        default: stale
+      exempt-issue-labels:
+        description: Comma-separated labels that exempt issues from stale
+        type: string
+        required: false
+        default: pinned,security,enhancement
+      exempt-pr-labels:
+        description: Comma-separated labels that exempt PRs from stale
+        type: string
+        required: false
+        default: pinned,dependencies,wip
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale: ${{ inputs.days-before-stale }}
+          days-before-close: ${{ inputs.days-before-close }}
+          stale-issue-label: ${{ inputs.stale-issue-label }}
+          stale-pr-label: ${{ inputs.stale-pr-label }}
+          exempt-issue-labels: ${{ inputs.exempt-issue-labels }}
+          exempt-pr-labels: ${{ inputs.exempt-pr-labels }}
+          stale-issue-message: >
+            This issue has been automatically marked as stale due to 60 days of
+            inactivity. It will be closed in 7 days if no further activity
+            occurs. If this is still relevant, please add a comment to keep it
+            open.
+          stale-pr-message: >
+            This PR has been automatically marked as stale due to 60 days of
+            inactivity. It will be closed in 7 days if no further activity
+            occurs. If work is still in progress, please add a comment or push
+            a commit to keep it open.
+          close-issue-message: >
+            This issue was automatically closed due to inactivity. Feel free to
+            reopen if it becomes relevant again.
+          close-pr-message: >
+            This PR was automatically closed due to inactivity. Feel free to
+            reopen or submit a fresh PR when ready.
