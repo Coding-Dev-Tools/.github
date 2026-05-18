@@ -21,6 +21,7 @@
 | [envault](https://github.com/Coding-Dev-Tools/envault) | Sync env variables across environments | ⭐ |
 | [schemaforge](https://github.com/Coding-Dev-Tools/schemaforge) | Convert ORM schemas between frameworks | ⭐ |
 | [apighost](https://github.com/Coding-Dev-Tools/apighost) | Mock API servers from OpenAPI specs | ⭐ |
+| [apiauth](https://github.com/Coding-Dev-Tools/apiauth) | Manage API keys and JWTs from terminal | ⭐ |
 
 **Suite install:** `pip install revenueholdings`
 
@@ -28,7 +29,7 @@
 
 ## 📊 By the Numbers
 
-- **10** CLI tools for developers
+- **11** CLI tools for developers
 - **35+** blog articles
 - **722+** automated tests
 - **14** MCP directory listings

@@ -10,7 +10,7 @@
 | [json2sql](https://github.com/Coding-Dev-Tools/json2sql) | Convert JSON to SQL INSERT statements |
 | [DeployDiff](https://github.com/Coding-Dev-Tools/deploydiff) | Preview infrastructure costs before deploy |
 | [ConfigDrift](https://github.com/Coding-Dev-Tools/configdrift) | Detect config drift across environments |
-| [APIAuth](https://github.com/Coding-Dev-Tools/apiauth) | Manage API keys and JWTs from terminal |
+| [APIAuth](https://github.com/Coding-Dev-Tools/apiauth) | Manage API keys and JWTs from terminal 😈 |
 | [APIGhost](https://github.com/Coding-Dev-Tools/apighost) | Mock API server from OpenAPI specs |
 | [Envault](https://github.com/Coding-Dev-Tools/envault) | Sync and rotate .env files |
 | [SchemaForge](https://github.com/Coding-Dev-Tools/schemaforge) | Bidirectional ORM schema conversion (11 formats) |
@@ -20,11 +20,13 @@
 
 ### Install
 
-```pip install git+https://github.com/Coding-Dev-Tools/devforge.git```
+```bash
+pip install git+https://github.com/Coding-Dev-Tools/devforge.git
+```
 
 ### Links
 
-- [Website](https://coding-dev-tools.github.io/devforge.dev/)
-- [Pricing](https://coding-dev-tools.github.io/devforge.dev/pricing.html)
-- [Documentation](https://coding-dev-tools.github.io/devforge.dev/docs.html)
-- [Blog](https://coding-dev-tools.github.io/devforge.dev/blog.html)
+- [Website](https://coding-dev-tools.github.io/revenueholdings.dev/)
+- [Pricing](https://coding-dev-tools.github.io/revenueholdings.dev/pricing.html)
+- [Documentation](https://coding-dev-tools.github.io/revenueholdings.dev/docs.html)
+- [Blog](https://coding-dev-tools.github.io/revenueholdings.dev/blog.html)
