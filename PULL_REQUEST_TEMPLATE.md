@@ -1,22 +1,36 @@
 ## Description
 
-<!-- Describe the changes in this PR and the problem it solves. -->
+<!-- Briefly describe the change and why it's needed. -->
+
+Fixes #(issue)
 
 ## Type of Change
 
+<!-- Mark the relevant option(s) with an `x`. -->
+
 - [ ] Bug fix (non-breaking change that fixes an issue)
 - [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would break existing functionality)
+- [ ] Breaking change (fix or feature that causes existing functionality to change)
 - [ ] Documentation update
-- [ ] CI / automation improvement
-
-## How Has This Been Tested?
-
-<!-- Describe the tests you ran to verify your changes. -->
+- [ ] CI/tooling improvement
+- [ ] Refactor (no functional change)
 
 ## Checklist
 
-- [ ] My code follows the style guidelines of this project
-- [ ] I have performed a self-review of my own changes
-- [ ] I have added tests that prove my fix is effective or my feature works
-- [ ] New and existing tests pass
+<!-- Ensure all items are complete before requesting review. -->
+
+- [ ] **Conventional commit**: PR title follows [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): description`)
+- [ ] **Tests added/updated** for the change
+- [ ] **All tests pass** locally
+- [ ] **Lint passes** (`ruff check .` or equivalent)
+- [ ] **Documentation updated** (README, docstrings, or inline comments)
+- [ ] **No duplicate PR** — checked open PRs for overlapping work
+- [ ] **Changelog entry** updated (if applicable)
+
+## Related PRs / Issues
+
+<!-- Link any related PRs or issues here. -->
+
+## Screenshots (if applicable)
+
+<!-- Attach screenshots or terminal output for UI/CLI changes. -->
