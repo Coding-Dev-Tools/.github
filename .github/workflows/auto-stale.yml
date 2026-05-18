@@ -1,0 +1,17 @@
+# DevForge — .github repo stale cleanup schedule
+#
+# Runs nightly for the .github repo itself. Other repos should
+# add their own caller workflow referencing stale.yml.
+
+name: Auto-Stale (.github)
+
+on:
+  schedule:
+    - cron: 30 1 * * *
+
+jobs:
+  stale:
+    uses: ./.github/workflows/stale.yml
+    permissions:
+      issues: write
+      pull-requests: write

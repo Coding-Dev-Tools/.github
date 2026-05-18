@@ -1,9 +1,7 @@
-# DevForge — Org-level Stale Issue & PR Management
+# DevForge — Org-level Reusable Stale Issue & PR Management
 #
-# Reusable workflow for any Coding-Dev-Tools repo.
-# Also runs on a schedule for the .github repo itself.
+# Call from any Coding-Dev-Tools repo:
 #
-# Usage in a repo:
 #   name: Stale
 #   on:
 #     schedule:
@@ -50,8 +48,6 @@ on:
         type: string
         required: false
         default: pinned,dependencies,wip
-  schedule:
-    - cron: 30 1 * * *
 
 jobs:
   stale:
