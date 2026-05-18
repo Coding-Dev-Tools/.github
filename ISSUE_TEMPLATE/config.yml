@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: DevForge Documentation
+    url: https://coding-dev-tools.github.io/devforge.dev/
+    about: Check the documentation, guides, and blog posts
+  - name: DevForge Community Discussions
+    url: https://github.com/orgs/Coding-Dev-Tools/discussions
+    about: Ask questions, share ideas, and get help from the community
+  - name: DevForge on Twitter
+    url: https://x.com/DevForgeTools
+    about: Follow for announcements and updates
