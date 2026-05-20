@@ -1,0 +1,6 @@
+# DevForge Funding Configuration
+# Enables the Sponsor button on all Coding-Dev-Tools repos.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button
+
+github: [DevForgeTools]
+custom: ["https://coding-dev-tools.github.io/devforge.dev/"]
