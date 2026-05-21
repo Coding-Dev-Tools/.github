@@ -24,6 +24,37 @@
 pip install devforge
 ```
 
+## Reusable Workflows
+
+This repository provides reusable GitHub Actions workflows for use across the DevForge organization.
+
+### Dependency Review
+
+Scans PR dependency changes for known vulnerabilities before merging.
+
+```yaml
+name: Dependency Review
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  dependency-review:
+    uses: Coding-Dev-Tools/.github/.github/workflows/dependency-review.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+Supported inputs:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `fail-on-severity` | `high` | Severity threshold: low, medium, high, critical |
+| `allow-licenses` | (empty) | Comma-separated allowed licenses |
+| `deny-licenses` | (empty) | Comma-separated denied licenses |
+| `fail-on-scopes` | `runtime,unknown` | Scopes to fail on: runtime, development, unknown |
+---
+
 ### Links
 
 - [Website](https://coding-dev-tools.github.io/devforge.dev/)
