@@ -12,6 +12,8 @@
 #       permissions:
 #         issues: write
 #         pull-requests: write
+#
+# Exemption labels: add sentinel-review to keep human-review PRs open.
 
 name: Stale Issue & PR Manager
 
@@ -47,7 +49,27 @@ on:
         description: Comma-separated labels that exempt PRs from stale
         type: string
         required: false
-        default: pinned,dependencies,wip
+        default: pinned,dependencies,wip,sentinel-review
+      stale-issue-message:
+        description: Custom stale issue message (defaults to dynamic message using days-before-stale/days-before-close)
+        type: string
+        required: false
+        default: ''
+      stale-pr-message:
+        description: Custom stale PR message (defaults to dynamic message using days-before-stale/days-before-close)
+        type: string
+        required: false
+        default: ''
+      close-issue-message:
+        description: Custom close issue message
+        type: string
+        required: false
+        default: ''
+      close-pr-message:
+        description: Custom close PR message
+        type: string
+        required: false
+        default: ''
 
 jobs:
   stale:
@@ -65,19 +87,7 @@ jobs:
           stale-pr-label: ${{ inputs.stale-pr-label }}
           exempt-issue-labels: ${{ inputs.exempt-issue-labels }}
           exempt-pr-labels: ${{ inputs.exempt-pr-labels }}
-          stale-issue-message: >
-            This issue has been automatically marked as stale due to 60 days of
-            inactivity. It will be closed in 7 days if no further activity
-            occurs. If this is still relevant, please add a comment to keep it
-            open.
-          stale-pr-message: >
-            This PR has been automatically marked as stale due to 60 days of
-            inactivity. It will be closed in 7 days if no further activity
-            occurs. If work is still in progress, please add a comment or push
-            a commit to keep it open.
-          close-issue-message: >
-            This issue was automatically closed due to inactivity. Feel free to
-            reopen if it becomes relevant again.
-          close-pr-message: >
-            This PR was automatically closed due to inactivity. Feel free to
-            reopen or submit a fresh PR when ready.
+          stale-issue-message: ${{ inputs.stale-issue-message || format('This issue has been automatically marked as stale due to {0} days of inactivity. It will be closed in {1} days if no further activity occurs. If this is still relevant, please add a comment to keep it open.', inputs.days-before-stale, inputs.days-before-close) }}
+          stale-pr-message: ${{ inputs.stale-pr-message || format('This PR has been automatically marked as stale due to {0} days of inactivity. It will be closed in {1} days if no further activity occurs. If work is still in progress, please add a comment or push a commit to keep it open.', inputs.days-before-stale, inputs.days-before-close) }}
+          close-issue-message: ${{ inputs.close-issue-message || 'This issue was automatically closed due to inactivity. Feel free to reopen if it becomes relevant again.' }}
+          close-pr-message: ${{ inputs.close-pr-message || 'This PR was automatically closed due to inactivity. Feel free to reopen or submit a fresh PR when ready.' }}
