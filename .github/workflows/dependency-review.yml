@@ -1,0 +1,87 @@
+# DevForge — Org-level Reusable Dependency Review Workflow
+#
+# Scans PR dependency changes for known vulnerabilities before merging.
+# Call from any Coding-Dev-Tools repo:
+#
+#   name: Dependency Review
+#   on:
+#     pull_request:
+#       branches: [main]
+#   jobs:
+#     dependency-review:
+#       uses: Coding-Dev-Tools/.github/.github/workflows/dependency-review.yml@main
+#       permissions:
+#         contents: read
+#         pull-requests: write
+#
+# Note: Requires that dependency manifest files exist in the repo.
+# Supported ecosystems: pip, npm, cargo, go, maven, gradle, nuget, docker.
+
+name: Dependency Review
+
+on:
+  workflow_call:
+    inputs:
+      fail-on-severity:
+        description: >
+          Severity threshold that fails the check.
+          One of: low, medium, high, critical.
+        type: string
+        required: false
+        default: high
+      allow-licenses:
+        description: >
+          Comma-separated list of allowed licenses.
+          Empty means all licenses are allowed.
+        type: string
+        required: false
+        default: ''
+      deny-licenses:
+        description: >
+          Comma-separated list of denied licenses.
+          Empty means no license denials.
+        type: string
+        required: false
+        default: ''
+      fail-on-scopes:
+        description: >
+          Comma-separated list of dependency scopes to fail on.
+          Options: runtime, development, unknown.
+        type: string
+        required: false
+        default: runtime,unknown
+      head-ref:
+        description: >
+          Override the head ref for the review.
+          Defaults to the PR head SHA.
+        type: string
+        required: false
+        default: ${{ github.event.pull_request.head.sha }}
+      base-ref:
+        description: >
+          Override the base ref for the review.
+          Defaults to the PR base SHA.
+        type: string
+        required: false
+        default: ${{ github.event.pull_request.base.sha }}
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+          allow-licenses: ${{ inputs.allow-licenses }}
+          deny-licenses: ${{ inputs.deny-licenses }}
+          fail-on-scopes: ${{ inputs.fail-on-scopes }}
+          head-ref: ${{ inputs.head-ref }}
+          base-ref: ${{ inputs.base-ref }}
+          comment-summary-in-pr: true
