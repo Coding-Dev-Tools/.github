@@ -1,0 +1,134 @@
+# DevForge — Reusable Python CI Workflow
+#
+# Standardizes test running, linting, and packaging for Python repos.
+# Call from any Coding-Dev-Tools Python repo:
+#
+#   name: Python CI
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+#       branches: [main]
+#   jobs:
+#     test:
+#       uses: Coding-Dev-Tools/.github/.github/workflows/python-ci.yml@main
+#       with:
+#         python-versions: '["3.11", "3.12", "3.13"]'
+#         runner-os: '["ubuntu-latest"]'
+#         run-lint: true
+#         lint-path: src
+#         run-build: true
+
+name: Python CI (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: JSON array of Python versions to test
+        type: string
+        required: false
+        default: '["3.10", "3.11", "3.12", "3.13"]'
+      runner-os:
+        description: JSON array of runner OS targets
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+      run-lint:
+        description: Run ruff linting
+        type: boolean
+        required: false
+        default: true
+      lint-path:
+        description: Path(s) to lint (space-separated)
+        type: string
+        required: false
+        default: src
+      run-build:
+        description: Run hatch build check
+        type: boolean
+        required: false
+        default: true
+      test-command:
+        description: Custom test command override
+        type: string
+        required: false
+        default: ''
+      extra-deps:
+        description: Extra pip install deps (space-separated)
+        type: string
+        required: false
+        default: ''
+
+    secrets:
+      CODECOV_TOKEN:
+        description: Token for uploading coverage to Codecov
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    if: inputs.run-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff check
+        run: ruff check ${{ inputs.lint-path }}
+      - name: Run ruff format check
+        run: ruff format --check ${{ inputs.lint-path }}
+
+  test:
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: ${{ fromJSON(inputs.runner-os) }}
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the project
+        run: |
+          pip install hatch
+          hatch env create
+        continue-on-error: true
+      - name: Install legacy
+        if: steps.hatch.outcome == 'failure'
+        run: |
+          pip install -e ".[dev,test]" 2>/dev/null || pip install -e ".[dev]" 2>/dev/null || pip install -e .
+      - name: Install extra deps
+        if: inputs.extra-deps != ''
+        run: pip install ${{ inputs.extra-deps }}
+      - name: Run tests
+        run: ${{ inputs.test-command || 'hatch run test' }}
+      - name: Upload coverage
+        if: inputs.test-command == '' && matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  build:
+    if: inputs.run-build
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install hatch
+        run: pip install hatch
+      - name: Build package
+        run: hatch build
