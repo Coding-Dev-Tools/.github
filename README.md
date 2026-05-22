@@ -28,6 +28,34 @@ pip install devforge
 
 This repository provides reusable GitHub Actions workflows for use across the DevForge organization.
 
+### Python CI
+
+Standard reusable CI for Python repositories. Runs linting (ruff), tests (pytest via hatch) across a configurable Python version matrix, and validates the build.
+
+```yaml
+name: Python CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  test:
+    uses: Coding-Dev-Tools/.github/.github/workflows/python-ci.yml@main
+```
+
+Supported inputs:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `python-versions` | `["3.10","3.11","3.12","3.13"]` | JSON array of Python versions |
+| `runner-os` | `["ubuntu-latest"]` | JSON array of runner OS targets |
+| `run-lint` | `true` | Run ruff linting |
+| `lint-path` | `src` | Path(s) to lint (space-separated) |
+| `run-build` | `true` | Run hatch build check |
+| `test-command` | (auto) | Custom test command override |
+| `extra-deps` | (empty) | Extra pip install deps |
+
 ### Dependency Review
 
 Scans PR dependency changes for known vulnerabilities before merging.
