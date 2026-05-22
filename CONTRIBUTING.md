@@ -1,4 +1,4 @@
-# Contributing to DevForge / Revenue Holdings
+# Contributing to DevForge
 
 Thank you for your interest in contributing! All tools in the DevForge organization are open source (MIT) and built with contribution in mind.
 
