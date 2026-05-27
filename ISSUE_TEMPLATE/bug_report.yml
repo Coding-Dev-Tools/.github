@@ -26,6 +26,22 @@ body:
         - Other (specify below)
     validations:
       required: true
+  - type: input
+    id: other-repo
+    attributes:
+      label: Other repo name
+      description: Required if you selected "Other" above
+      placeholder: e.g., my-custom-tool
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Tool version
+      description: What version of the tool are you using? (run `<tool-name> --version`)
+      placeholder: e.g., 0.5.2
+    validations:
+      required: false
   - type: textarea
     id: description
     attributes:

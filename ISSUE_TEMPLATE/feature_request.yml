@@ -26,6 +26,14 @@ body:
         - Other (specify below)
     validations:
       required: true
+  - type: input
+    id: other-repo
+    attributes:
+      label: Other repo name
+      description: Required if you selected "Other" above
+      placeholder: e.g., my-custom-tool
+    validations:
+      required: false
   - type: textarea
     id: problem
     attributes:
