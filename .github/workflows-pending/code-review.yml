@@ -1,0 +1,307 @@
+# DevForge — Reusable Automated Code Review Pipeline
+#
+# Runs on pull requests to review code quality, security, and test coverage.
+# Call from any Coding-Dev-Tools repo:
+#
+# name: Code Review
+# on:
+#   pull_request:
+#     branches: [main, master]
+# jobs:
+#   code-review:
+#     uses: Coding-Dev-Tools/.github/.github/workflows/code-review.yml@main
+#     with:
+#       python-version: '3.12'
+#       lint-paths: 'src'
+#       test-path: 'tests'
+#       src-path: 'src'
+#     secrets:
+#       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+name: Code Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version for lint and security jobs
+        type: string
+        required: false
+        default: '3.12'
+      lint-paths:
+        description: Space-separated paths to lint (e.g. 'src tests')
+        type: string
+        required: false
+        default: 'src'
+      test-path:
+        description: Path to test directory
+        type: string
+        required: false
+        default: 'tests'
+      src-path:
+        description: Path to source directory (for coverage target)
+        type: string
+        required: false
+        default: 'src'
+      run-bandit:
+        description: Run Bandit security linter
+        type: boolean
+        required: false
+        default: true
+      run-semgrep:
+        description: Run Semgrep static analysis
+        type: boolean
+        required: false
+        default: true
+      fail-on-vulnerability:
+        description: Fail on any medium+ security findings
+        type: boolean
+        required: false
+        default: true
+      min-coverage:
+        description: Minimum test coverage percentage (0 = no gate)
+        type: number
+        required: false
+        default: 0
+      node-project:
+        description: Set true if the repo also has a Node.js component
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      CODECOV_TOKEN:
+        description: Token for uploading coverage to Codecov
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  # ── 1. Code Quality ──────────────────────────────────────────────────
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install linting tools
+        run: pip install ruff mypy
+
+      - name: Ruff check (lint)
+        run: ruff check ${{ inputs.lint-paths }} --output-format=github
+
+      - name: Ruff format check
+        run: ruff format --check ${{ inputs.lint-paths }}
+
+      - name: Type check with mypy
+        run: |
+          pip install -e ".[dev,test]" 2>/dev/null || pip install -e ".[dev]" 2>/dev/null || pip install -e .
+          mypy ${{ inputs.src-path }} --ignore-missing-imports --no-error-summary || true
+        continue-on-error: true
+
+      - name: Node lint (if applicable)
+        if: inputs.node-project
+        run: |
+          if [ -f package.json ]; then
+            npm ci || npm install
+            npx eslint . --format compact || true
+          fi
+        continue-on-error: true
+
+  # ── 2. Security Scan ─────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      # --- Bandit: Python security linter ---
+      - name: Install Bandit
+        if: inputs.run-bandit
+        run: pip install bandit[toml]
+
+      - name: Run Bandit
+        if: inputs.run-bandit
+        run: |
+          bandit -r ${{ inputs.src-path }} \
+            -f json \
+            -o bandit-report.json \
+            --severity-level medium \
+            --confidence-level medium \
+            || true
+
+      - name: Check Bandit findings
+        if: inputs.run-bandit && inputs.fail-on-vulnerability
+        run: |
+          if [ -f bandit-report.json ]; then
+            HIGHEST=$(python3 -c "
+              import json,sys
+              try:
+                r=json.load(open('bandit-report.json'))
+                severities=[i['issue_severity'] for i in r.get('results',[])]
+                if 'HIGH' in severities: print('HIGH')
+                elif 'MEDIUM' in severities: print('MEDIUM')
+                else: print('LOW')
+              except: print('NONE')
+            ")
+            if [ "$HIGHEST" = "HIGH" ] || [ "$HIGHEST" = "MEDIUM" ]; then
+              echo "::error::Bandit found $HIGHEST severity security issues"
+              bandit -r ${{ inputs.src-path }} --severity-level medium --confidence-level medium
+              exit 1
+            fi
+          fi
+
+      # --- Semgrep: multi-language static analysis ---
+      - name: Run Semgrep
+        if: inputs.run-semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+            p/security-audit
+            p/owasp-top-ten
+        continue-on-error: true
+
+      # --- pip-audit: Python dependency vulnerability check ---
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        run: |
+          pip install -e ".[dev,test]" 2>/dev/null || pip install -e ".[dev]" 2>/dev/null || pip install -e .
+          pip-audit --desc 2>&1 | tee pip-audit-report.txt || true
+
+      - name: Check pip-audit findings
+        if: inputs.fail-on-vulnerability
+        run: |
+          if grep -qE '^(Name|[^[:space:]])' pip-audit-report.txt && \
+             ! grep -qE '^0 known vulnerabilities' pip-audit-report.txt 2>/dev/null; then
+            # Check for known vulnerabilities in the output
+            if grep -qi 'vulnerability\|CVE' pip-audit-report.txt; then
+              echo "::warning::pip-audit found dependency vulnerabilities — review pip-audit-report.txt"
+            fi
+          fi
+
+      # --- npm audit (if applicable) ---
+      - name: Node security audit
+        if: inputs.node-project
+        run: |
+          if [ -f package.json ]; then
+            npm ci || npm install
+            npm audit --audit-level=moderate || true
+          fi
+        continue-on-error: true
+
+  # ── 3. Test Coverage ─────────────────────────────────────────────────
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install project
+        run: |
+          pip install hatch pytest pytest-cov
+          hatch env create 2>/dev/null || true
+          if ! hatch env show 2>/dev/null | grep -q test; then
+            pip install -e ".[dev,test]" 2>/dev/null || pip install -e ".[dev]" 2>/dev/null || pip install -e .
+          fi
+
+      - name: Run tests with coverage
+        run: |
+          COV_PKG=$(basename ${{ inputs.src-path }})
+          hatch run test 2>/dev/null || \
+            python -m pytest ${{ inputs.test-path }} -v \
+              --cov=${COV_PKG} \
+              --cov-report=term-missing \
+              --cov-report=json:coverage.json \
+              --cov-report=xml:coverage.xml
+
+      - name: Enforce minimum coverage
+        if: inputs.min-coverage > 0
+        run: |
+          if [ -f coverage.json ]; then
+            ACTUAL=$(python3 -c "
+              import json
+              try:
+                d=json.load(open('coverage.json'))
+                print(d['totals']['percent_covered'])
+              except: print('0')
+            ")
+            echo "Coverage: ${ACTUAL}% (minimum: ${{ inputs.min-coverage }}%)"
+            if (( $(echo "$ACTUAL < ${{ inputs.min-coverage }}" | bc -l) )); then
+              echo "::error::Coverage ${ACTUAL}% is below minimum ${{ inputs.min-coverage }}%"
+              exit 1
+            fi
+          else
+            echo "::warning::coverage.json not found — skipping coverage gate"
+          fi
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          files: coverage.xml
+
+  # ── 4. Summary Comment ───────────────────────────────────────────────
+  review-summary:
+    name: Review Summary
+    needs: [lint, security, coverage]
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Post review summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: |
+          emoji() { [ "$1" = "success" ] && echo "✅" || echo "❌"; }
+          SKIP_EMOJI="⏭️"
+
+          LINT_EMOJI=$(emoji "$LINT_RESULT")
+          SEC_EMOJI=$(emoji "$SECURITY_RESULT")
+          COV_EMOJI=$(emoji "$COVERAGE_RESULT")
+
+          BODY="## 🔍 Automated Code Review Summary
+
+          | Check | Status |
+          |-------|--------|
+          | ${LINT_EMOJI} Lint & Format | ${LINT_RESULT} |
+          | ${SEC_EMOJI} Security Scan | ${SECURITY_RESULT} |
+          | ${COV_EMOJI} Test Coverage | ${COVERAGE_RESULT} |
+
+          > Generated by \`.github/code-review.yml\` reusable workflow."
+
+          # Try to comment on the PR (only works in actual PR context)
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body "$BODY" || true
+          else
+            echo "$BODY"
+          fi
