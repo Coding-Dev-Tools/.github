@@ -83,6 +83,48 @@ Supported inputs:
 | `fail-on-scopes` | `runtime,unknown` | Scopes to fail on: runtime, development, unknown |
 ---
 
+### Auto Code Review
+
+Automated code review for pull requests — runs lint, format, secret detection, TODO markers, and large-file checks, then posts a summary PR comment with a pass/warn/fail verdict.
+
+```yaml
+name: Auto Code Review
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+jobs:
+  code-review:
+    uses: Coding-Dev-Tools/.github/.github/workflows/auto-code-review.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+```
+
+Supported inputs:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `python-version` | `'3.12'` | Python version for lint tools |
+| `ruff-targets` | `'.'` | Paths ruff should scan (space-separated) |
+| `detect-secrets` | `true` | Run detect-secrets credential scan |
+| `check-todos` | `false` | Warn on leftover TODO/FIXME/HACK markers |
+| `max-file-size` | `500` | Max allowed file size in KB (0 = skip) |
+| `post-comment` | `true` | Post review summary as a PR comment |
+
+**Checks performed:**
+
+| Check | Tool | Severity |
+|-------|------|----------|
+| Lint | Ruff | Warning |
+| Format | Ruff | Warning |
+| Secret detection | detect-secrets | **Fail** |
+| TODO/FIXME/HACK | grep | Warning |
+| Large files | find | Warning |
+
+> **Setup note:** The workflow file lives in `templates/workflows/auto-code-review.yml` in this repo. To activate it, copy or symlink it to `.github/workflows/auto-code-review.yml`. This is required because GitHub only recognizes workflow files under `.github/workflows/`.
+
 ### Links
 
 - [Website](https://coding-dev-tools.github.io/devforge.dev/)
