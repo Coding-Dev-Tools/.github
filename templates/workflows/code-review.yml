@@ -1,0 +1,115 @@
+# DevForge — Reusable Automated Code Review Workflow
+#
+# Runs lint, security scan, type-check, and tests on PRs using the
+# actions/code-review composite action, and posts a summary comment.
+#
+# To activate in a repo, copy this file to .github/workflows/code-review.yml
+# OR call it as a reusable workflow:
+#
+# name: Code Review
+# on:
+#   pull_request:
+#     types: [opened, synchronize, reopened]
+# jobs:
+#   review:
+#     uses: Coding-Dev-Tools/.github/.github/workflows/code-review.yml@main
+#     with:
+#       python-version: '3.12'
+#       run-ruff: true
+#       run-bandit: true
+#       run-type-check: false
+#       run-pytest: true
+#       source-dir: src
+#       fail-on-security: true
+#     permissions:
+#       contents: read
+#       pull-requests: write
+#       checks: write
+
+name: Code Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version for review tools'
+        type: string
+        required: false
+        default: '3.12'
+      run-ruff:
+        description: 'Run ruff lint check'
+        type: boolean
+        required: false
+        default: true
+      run-bandit:
+        description: 'Run bandit security scan'
+        type: boolean
+        required: false
+        default: true
+      run-type-check:
+        description: 'Run mypy type checking (requires mypy config)'
+        type: boolean
+        required: false
+        default: false
+      run-pytest:
+        description: 'Run pytest suite as part of review'
+        type: boolean
+        required: false
+        default: true
+      source-dir:
+        description: 'Source directory to lint/scan'
+        type: string
+        required: false
+        default: 'src'
+      fail-on-security:
+        description: 'Fail the review if high-severity security issues found'
+        type: boolean
+        required: false
+        default: true
+      post-comment:
+        description: 'Post review summary as a PR comment'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  review:
+    name: Review
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run code review
+        uses: Coding-Dev-Tools/.github/actions/code-review@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          run-ruff: ${{ inputs.run-ruff }}
+          run-bandit: ${{ inputs.run-bandit }}
+          run-type-check: ${{ inputs.run-type-check }}
+          run-pytest: ${{ inputs.run-pytest }}
+          source-dir: ${{ inputs.source-dir }}
+          fail-on-security: ${{ inputs.fail-on-security }}
+
+      - name: Post review status comment
+        if: always() && inputs.post-comment && github.event.pull_request.number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conclusion = '${{ job.status }}' === 'success' ? '✅ Passed' : '❌ Failed';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## Automated Code Review ${conclusion}\n\nThe automated review (lint, security scan, tests) has completed. Check the **Checks** tab for detailed results.\n\n_Automated by [Coding-Dev-Tools/.github](https://github.com/Coding-Dev-Tools/.github) reusable workflow._`
+            });
