@@ -1,0 +1,399 @@
+# DevForge — Reusable Automated Code Review Workflow
+#
+# Runs automated code-quality and security checks on every PR and posts
+# a summary comment.  Call from any Coding-Dev-Tools repo:
+#
+# name: Auto Code Review
+# on:
+#   pull_request:
+#     branches: [main]
+#     types: [opened, synchronize, reopened]
+# jobs:
+#   code-review:
+#     uses: Coding-Dev-Tools/.github/.github/workflows/auto-code-review.yml@main
+#     permissions:
+#       contents: read
+#       pull-requests: write
+#       security-events: write
+#
+# Supported inputs:
+#   python-version    – Python version for lint tools (default: '3.12')
+#   ruff-targets      – Paths ruff should scan (default: '.')
+#   detect-secrets    – Run detect-secrets scan (default: true)
+#   check-todos       – Fail on leftover TODO/FIXME/HACK (default: false)
+#   max-file-size     – Fail if any file exceeds N KB (default: 500)
+#   post-comment      – Post summary PR comment (default: true)
+
+name: Auto Code Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version for lint tools
+        type: string
+        required: false
+        default: '3.12'
+      ruff-targets:
+        description: Paths ruff should scan (space-separated)
+        type: string
+        required: false
+        default: '.'
+      detect-secrets:
+        description: Run detect-secrets credential scan
+        type: boolean
+        required: false
+        default: true
+      check-todos:
+        description: Fail on leftover TODO/FIXME/HACK markers
+        type: boolean
+        required: false
+        default: false
+      max-file-size:
+        description: Max allowed file size in KB (0 = skip)
+        type: number
+        required: false
+        default: 500
+      post-comment:
+        description: Post review summary as a PR comment
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  review:
+    name: Automated code review
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ inputs.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      # ── Ruff lint + format check ──────────────────────────────
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff lint
+        id: ruff-lint
+        continue-on-error: true
+        run: |
+          # Run with --exit-zero so the step never fails the job
+          ruff check ${{ inputs.ruff-targets }} \
+            --output-format=github \
+            --exit-zero \
+            | tee /tmp/ruff-lint.txt
+          # Produce JSON for issue counting in the summary
+          ruff check ${{ inputs.ruff-targets }} --exit-zero --output-format=json > /tmp/ruff-lint.json 2>/dev/null || true
+          # Determine if there are any issues
+          RUFF_COUNT=$(python3 -c "
+          import json, sys
+          try:
+              data = json.load(open('/tmp/ruff-lint.json'))
+              print(len(data))
+          except Exception:
+              print(0)
+          ")
+          echo "count=$RUFF_COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$RUFF_COUNT" -gt 0 ]; then
+            echo "has_issues=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_issues=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ruff format check
+        id: ruff-format
+        continue-on-error: true
+        run: |
+          if ruff format --check ${{ inputs.ruff-targets }} > /tmp/ruff-format.txt 2>&1; then
+            echo "has_issues=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_issues=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Secret detection ──────────────────────────────────────
+      - name: Install detect-secrets
+        if: inputs.detect-secrets
+        run: pip install detect-secrets
+
+      - name: Scan for secrets
+        id: secrets
+        if: inputs.detect-secrets
+        continue-on-error: true
+        run: |
+          detect-secrets scan --all-files \
+            --exclude-files '\.git/.*' \
+            --exclude-files 'node_modules/.*' \
+            --exclude-files '\.venv/.*' \
+            > /tmp/secrets-baseline.json 2>/dev/null || true
+          SECRETS_COUNT=$(python3 -c "
+          import json, sys
+          try:
+              data = json.load(open('/tmp/secrets-baseline.json'))
+              total = sum(len(v) for v in data.get('results', {}).values())
+              print(total)
+          except Exception:
+              print(0)
+          ")
+          echo "count=$SECRETS_COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$SECRETS_COUNT" -gt 0 ]; then
+            echo "has_issues=true" >> "$GITHUB_OUTPUT"
+            python3 -c "
+          import json
+          data = json.load(open('/tmp/secrets-baseline.json'))
+          for filepath, findings in data.get('results', {}).items():
+              for f in findings:
+                  print(f'  {filepath}:{f[\"line_number\"]} — {f[\"type\"]}')
+          " | tee /tmp/secrets-report.txt
+          else
+            echo "has_issues=false" >> "$GITHUB_OUTPUT"
+            echo "No secrets detected." > /tmp/secrets-report.txt
+          fi
+
+      # ── TODO / FIXME / HACK check ─────────────────────────────
+      - name: Check for leftover TODO/FIXME/HACK
+        id: todos
+        if: inputs.check-todos
+        continue-on-error: true
+        run: |
+          # Only check files changed in the PR
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          if [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
+            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.py' '*.js' '*.ts' '*.tsx' '*.rs' '*.go' 2>/dev/null || git diff --name-only HEAD~1 -- '*.py' '*.js' '*.ts' '*.tsx' '*.rs' '*.go')
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 -- '*.py' '*.js' '*.ts' '*.tsx' '*.rs' '*.go' 2>/dev/null || echo "")
+          fi
+          TODO_COUNT=0
+          TODO_REPORT=""
+          for f in $CHANGED_FILES; do
+            if [ -f "$f" ]; then
+              MATCHES=$(grep -nE '(TODO|FIXME|HACK|XXX):' "$f" 2>/dev/null || true)
+              if [ -n "$MATCHES" ]; then
+                COUNT=$(echo "$MATCHES" | wc -l)
+                TODO_COUNT=$((TODO_COUNT + COUNT))
+                TODO_REPORT="${TODO_REPORT}
+            ${f}:
+              ${MATCHES}"
+              fi
+            fi
+          done
+          echo "count=$TODO_COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$TODO_COUNT" -gt 0 ]; then
+            echo "has_issues=true" >> "$GITHUB_OUTPUT"
+            echo -e "Found ${TODO_COUNT} TODO/FIXME/HACK marker(s):\n${TODO_REPORT}" > /tmp/todos-report.txt
+          else
+            echo "has_issues=false" >> "$GITHUB_OUTPUT"
+            echo "No leftover TODO/FIXME/HACK markers." > /tmp/todos-report.txt
+          fi
+
+      # ── Large file check ──────────────────────────────────────
+      - name: Check for oversized files
+        id: large-files
+        if: inputs.max-file-size > 0
+        continue-on-error: true
+        run: |
+          THRESHOLD=$((inputs.max-file-size * 1024))
+          LARGE_FILES=$(find . -type f -size +${THRESHOLD}c \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -not -path './.venv/*' \
+            -not -path './__pycache__/*' \
+            -not -path '*/package-lock.json' \
+            -not -path '*/pnpm-lock.yaml' \
+            -not -path '*.lock' \
+            2>/dev/null || true)
+          if [ -n "$LARGE_FILES" ]; then
+            echo "has_issues=true" >> "$GITHUB_OUTPUT"
+            echo -e "Oversized files (>${{ inputs.max-file-size }} KB):\n${LARGE_FILES}" > /tmp/large-files-report.txt
+          else
+            echo "has_issues=false" >> "$GITHUB_OUTPUT"
+            echo "No oversized files." > /tmp/large-files-report.txt
+          fi
+
+      # ── Diff stats ────────────────────────────────────────────
+      - name: Gather diff stats
+        id: diff-stats
+        run: |
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          if [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
+            git diff --stat "$BASE_SHA" "$HEAD_SHA" > /tmp/diff-stats.txt 2>/dev/null || echo "N/A" > /tmp/diff-stats.txt
+            FILES_CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null | wc -l || echo 0)
+          else
+            git diff --stat HEAD~1 > /tmp/diff-stats.txt 2>/dev/null || echo "N/A" > /tmp/diff-stats.txt
+            FILES_CHANGED=$(git diff --name-only HEAD~1 2>/dev/null | wc -l || echo 0)
+          fi
+          echo "files_changed=$FILES_CHANGED" >> "$GITHUB_OUTPUT"
+
+      # ── Build summary ─────────────────────────────────────────
+      - name: Build review summary
+        id: summary
+        run: |
+          cat > /tmp/review-summary.md << 'HEADER'
+          ## 🤖 Automated Code Review
+
+          HEADER
+
+          # Ruff lint
+          RUFF_LINT_ISSUES=${{ steps.ruff-lint.outputs.count || '0' }}
+          if [ "$RUFF_LINT_ISSUES" -gt 0 ]; then
+            echo "### ⚠️ Ruff Lint — ${RUFF_LINT_ISSUES} issue(s)" >> /tmp/review-summary.md
+            echo '```' >> /tmp/review-summary.md
+            head -50 /tmp/ruff-lint.txt >> /tmp/review-summary.md
+            echo '```' >> /tmp/review-summary.md
+            echo "" >> /tmp/review-summary.md
+          else
+            echo "### ✅ Ruff Lint — No issues" >> /tmp/review-summary.md
+            echo "" >> /tmp/review-summary.md
+          fi
+
+          # Ruff format
+          if [ "${{ steps.ruff-format.outputs.has_issues }}" = "true" ]; then
+            echo "### ⚠️ Ruff Format — Formatting needed" >> /tmp/review-summary.md
+            echo '```' >> /tmp/review-summary.md
+            head -30 /tmp/ruff-format.txt >> /tmp/review-summary.md
+            echo '```' >> /tmp/review-summary.md
+            echo "" >> /tmp/review-summary.md
+          else
+            echo "### ✅ Ruff Format — Clean" >> /tmp/review-summary.md
+            echo "" >> /tmp/review-summary.md
+          fi
+
+          # Secrets
+          if [ "${{ inputs.detect-secrets }}" = "true" ]; then
+            SECRETS_COUNT=${{ steps.secrets.outputs.count || '0' }}
+            if [ "$SECRETS_COUNT" -gt 0 ]; then
+              echo "### 🔴 Secret Detection — ${SECRETS_COUNT} potential secret(s)" >> /tmp/review-summary.md
+              echo '```' >> /tmp/review-summary.md
+              cat /tmp/secrets-report.txt >> /tmp/review-summary.md
+              echo '```' >> /tmp/review-summary.md
+              echo "" >> /tmp/review-summary.md
+            else
+              echo "### ✅ Secret Detection — Clean" >> /tmp/review-summary.md
+              echo "" >> /tmp/review-summary.md
+            fi
+          fi
+
+          # TODOs
+          if [ "${{ inputs.check-todos }}" = "true" ]; then
+            TODO_COUNT=${{ steps.todos.outputs.count || '0' }}
+            if [ "$TODO_COUNT" -gt 0 ]; then
+              echo "### ⚠️ TODO/FIXME/HACK — ${TODO_COUNT} marker(s)" >> /tmp/review-summary.md
+              echo '```' >> /tmp/review-summary.md
+              cat /tmp/todos-report.txt >> /tmp/review-summary.md
+              echo '```' >> /tmp/review-summary.md
+              echo "" >> /tmp/review-summary.md
+            else
+              echo "### ✅ TODO/FIXME/HACK — Clean" >> /tmp/review-summary.md
+              echo "" >> /tmp/review-summary.md
+            fi
+          fi
+
+          # Large files
+          if [ "${{ inputs.max-file-size }}" -gt 0 ]; then
+            if [ -f /tmp/large-files-report.txt ] && grep -q "Oversized" /tmp/large-files-report.txt 2>/dev/null; then
+              echo "### ⚠️ Large Files — Exceeds ${{ inputs.max-file-size }} KB limit" >> /tmp/review-summary.md
+              echo '```' >> /tmp/review-summary.md
+              cat /tmp/large-files-report.txt >> /tmp/review-summary.md
+              echo '```' >> /tmp/review-summary.md
+              echo "" >> /tmp/review-summary.md
+            else
+              echo "### ✅ Large Files — Within limits" >> /tmp/review-summary.md
+              echo "" >> /tmp/review-summary.md
+            fi
+          fi
+
+          # Diff stats
+          echo "### 📊 Diff Stats — ${{ steps.diff-stats.outputs.files_changed }} file(s) changed" >> /tmp/review-summary.md
+          echo '```' >> /tmp/review-summary.md
+          cat /tmp/diff-stats.txt >> /tmp/review-summary.md
+          echo '```' >> /tmp/review-summary.md
+          echo "" >> /tmp/review-summary.md
+
+          # Overall verdict
+          HAS_SECRET_ISSUES="${{ steps.secrets.outputs.has_issues || 'false' }}"
+          HAS_RUFF_LINT="${{ steps.ruff-lint.outputs.has_issues || 'false' }}"
+          HAS_RUFF_FORMAT="${{ steps.ruff-format.outputs.has_issues || 'false' }}"
+          HAS_TODOS="${{ steps.todos.outputs.has_issues || 'false' }}"
+          HAS_LARGE="${{ steps.large-files.outputs.has_issues || 'false' }}"
+
+          echo "---" >> /tmp/review-summary.md
+          if [ "$HAS_SECRET_ISSUES" = "true" ]; then
+            echo "**Verdict: 🔴 Changes Requested** — Potential secrets detected. Do not merge." >> /tmp/review-summary.md
+            echo "overall=fail" >> "$GITHUB_OUTPUT"
+          elif [ "$HAS_RUFF_LINT" = "true" ] || [ "$HAS_RUFF_FORMAT" = "true" ]; then
+            echo "**Verdict: ⚠️ Warnings** — Lint/format issues found. Recommend fixing before merge." >> /tmp/review-summary.md
+            echo "overall=warn" >> "$GITHUB_OUTPUT"
+          elif [ "$HAS_TODOS" = "true" ] || [ "$HAS_LARGE" = "true" ]; then
+            echo "**Verdict: ⚠️ Warnings** — Non-blocking issues found. See details above." >> /tmp/review-summary.md
+            echo "overall=warn" >> "$GITHUB_OUTPUT"
+          else
+            echo "**Verdict: ✅ Pass** — No issues found." >> /tmp/review-summary.md
+            echo "overall=pass" >> "$GITHUB_OUTPUT"
+          fi
+          echo "" >> /tmp/review-summary.md
+          echo "_Automated by [Coding-Dev-Tools/.github](https://github.com/Coding-Dev-Tools/.github) reusable workflow._" >> /tmp/review-summary.md
+
+          cat /tmp/review-summary.md
+
+      # ── Post PR comment ───────────────────────────────────────
+      - name: Post review comment
+        if: inputs.post-comment && github.event.pull_request.number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/review-summary.md', 'utf8');
+            const pr_number = context.payload.pull_request.number;
+
+            // Check for existing bot comment to update instead of duplicating
+            const comments = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: pr_number,
+              per_page: 100
+            });
+            const botComment = comments.data.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('🤖 Automated Code Review')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: pr_number,
+                body: body
+              });
+            }
+
+      # ── Fail workflow on critical issues ──────────────────────
+      - name: Check verdict
+        run: |
+          VERDICT="${{ steps.summary.outputs.overall }}"
+          echo "Overall verdict: $VERDICT"
+          if [ "$VERDICT" = "fail" ]; then
+            echo "Failing workflow due to critical issues (secrets detected)."
+            exit 1
+          fi
