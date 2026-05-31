@@ -1,0 +1,100 @@
+name: 'Automated Code Review'
+description: 'Reusable composite action for automated code review on PRs — lint, type-check, security scan, and diff analysis'
+
+inputs:
+  python-version:
+    description: 'Python version for review tools'
+    required: false
+    default: '3.12'
+  run-ruff:
+    description: 'Run ruff lint check'
+    required: false
+    default: 'true'
+  run-bandit:
+    description: 'Run bandit security scan'
+    required: false
+    default: 'true'
+  run-type-check:
+    description: 'Run mypy type checking (requires mypy config)'
+    required: false
+    default: 'false'
+  run-pytest:
+    description: 'Run pytest suite as part of review'
+    required: false
+    default: 'true'
+  source-dir:
+    description: 'Source directory to lint/scan'
+    required: false
+    default: 'src'
+  fail-on-security:
+    description: 'Fail the review if high-severity security issues found'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install review dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install ruff bandit mypy pytest
+
+    - name: Ruff lint check
+      if: inputs.run-ruff == 'true'
+      shell: bash
+      run: |
+        echo "## Ruff Lint Results" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        ruff check ${{ inputs.source-dir }}/ --target-version py310 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        # Re-run to get proper exit code
+        ruff check ${{ inputs.source-dir }}/ --target-version py310
+
+    - name: Bandit security scan
+      if: inputs.run-bandit == 'true'
+      shell: bash
+      run: |
+        echo "## Bandit Security Scan Results" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        bandit -r ${{ inputs.source-dir }}/ -f txt 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        # Re-run with proper exit code control
+        if [ "${{ inputs.fail-on-security }}" = "true" ]; then
+          bandit -r ${{ inputs.source-dir }}/ -f txt -ll
+        else
+          bandit -r ${{ inputs.source-dir }}/ -f txt -ll || true
+        fi
+
+    - name: Mypy type check
+      if: inputs.run-type-check == 'true'
+      shell: bash
+      run: |
+        echo "## Mypy Type Check Results" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        mypy ${{ inputs.source-dir }}/ 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        mypy ${{ inputs.source-dir }}/ || true
+
+    - name: Run pytest
+      if: inputs.run-pytest == 'true'
+      shell: bash
+      run: |
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        pytest --tb=short -q 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        # Re-run for exit code
+        pytest --tb=short -q
+
+    - name: Review summary
+      if: always()
+      shell: bash
+      run: |
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Automated code review completed." >> $GITHUB_STEP_SUMMARY
