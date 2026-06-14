@@ -1,0 +1,65 @@
+name: ✨ Feature Request
+description: Suggest an idea for a DevForge tool
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature!
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which repo?
+      description: Which DevForge tool would this affect?
+      options:
+        - api-contract-guardian
+        - apighost
+        - click-to-mcp
+        - configdrift
+        - datamorph
+        - deadcode
+        - deploydiff
+        - devforge
+        - envault
+        - json2sql
+        - schemaforge
+        - Other (specify below)
+    validations:
+      required: true
+  - type: input
+    id: other-repo
+    attributes:
+      label: Other repo name
+      description: Required if you selected "Other" above
+      placeholder: e.g., my-custom-tool
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Tool version
+      description: What version of the tool are you using? (run `<tool-name> --version`)
+      placeholder: e.g., 0.5.2
+    validations:
+      required: false
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem would this feature solve?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How should this feature work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative solutions or workarounds you've considered
+    validations:
+      required: false

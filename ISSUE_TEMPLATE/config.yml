@@ -9,3 +9,6 @@ contact_links:
   - name: DevForge on Twitter
     url: https://x.com/DevForgeTools
     about: Follow for announcements and updates
+  - name: Security Vulnerability
+    url: https://github.com/Coding-Dev-Tools/.github/security/policy
+    about: Report a security vulnerability
