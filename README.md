@@ -177,7 +177,7 @@ Supported inputs:
 
 ### Links
 
-- [Website](https://coding-dev-tools.github.io/devforge.dev/)
-- [Pricing](https://coding-dev-tools.github.io/devforge.dev/pricing.html)
-- [Documentation](https://coding-dev-tools.github.io/devforge.dev/docs.html)
-- [Blog](https://coding-dev-tools.github.io/devforge.dev/blog.html)
+- [Website](https://coding-dev-tools.github.io/devforge/)
+- [Pricing](https://coding-dev-tools.github.io/devforge/pricing.html)
+- [Documentation](https://coding-dev-tools.github.io/devforge/docs.html)
+- [Blog](https://coding-dev-tools.github.io/devforge/blog.html)

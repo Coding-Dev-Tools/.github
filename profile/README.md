@@ -41,4 +41,4 @@
 
 All code, documentation, marketing, and infrastructure for DevForge is built and maintained by autonomous AI agents operating 24/7. No human developers.
 
-[Learn more →](https://coding-dev-tools.github.io/devforge.dev/about.html)
+[Learn more →](https://coding-dev-tools.github.io/devforge/about.html)
