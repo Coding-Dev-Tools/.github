@@ -138,11 +138,11 @@ jobs:
         continue-on-error: true
         run: |
           detect-secrets scan --all-files \
-            --exclude-files '\\.git/.*' \
+            --exclude-files '\.git/.*' \
             --exclude-files 'node_modules/.*' \
-            --exclude-files '\\.venv/.*' \
-            --exclude-files '\\.pytest_cache/.*' \
-            --exclude-files '\\.ruff_cache/.*' \
+            --exclude-files '\.venv/.*' \
+            --exclude-files '\.pytest_cache/.*' \
+            --exclude-files '\.ruff_cache/.*' \
             --exclude-files 'tests/.*' \
             > /tmp/secrets-baseline.json 2>/dev/null || true
           SECRETS_COUNT=$(python3 -c "
