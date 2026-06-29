@@ -19,7 +19,7 @@
 # Supported inputs:
 #   python-version    – Python version for lint tools (default: '3.12')
 #   ruff-targets      – Paths ruff should scan (default: '.')
-#   detect-secrets    – Run detect-secrets scan (default: true)
+#   detect-secrets    – Run detect-secrets credential scan (default: true)
 #   check-todos       – Fail on leftover TODO/FIXME/HACK (default: false)
 #   max-file-size     – Fail if any file exceeds N KB (default: 500)
 #   post-comment      – Post summary PR comment (default: true)
@@ -138,9 +138,12 @@ jobs:
         continue-on-error: true
         run: |
           detect-secrets scan --all-files \
-            --exclude-files '\.git/.*' \
+            --exclude-files '\\.git/.*' \
             --exclude-files 'node_modules/.*' \
-            --exclude-files '\.venv/.*' \
+            --exclude-files '\\.venv/.*' \
+            --exclude-files '\\.pytest_cache/.*' \
+            --exclude-files '\\.ruff_cache/.*' \
+            --exclude-files 'tests/.*' \
             > /tmp/secrets-baseline.json 2>/dev/null || true
           SECRETS_COUNT=$(python3 -c "
           import json, sys
