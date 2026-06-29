@@ -1,25 +1,10 @@
 # Coding-Dev-Tools-dot-github
 
-## Purpose
-DevForge organization profile and reusable GitHub Actions workflows for 11 open-source CLI tools. Provides standardized CI (Python, Node), dependency review, and release workflows used across all Coding-Dev-Tools repositories.
+DevForge organization profile + reusable GitHub Actions workflows consumed by 11 open-source CLI tools.
+Key files: `.github/workflows/python-ci.yml`, `.github/workflows/node-ci.yml`, `ISSUE_TEMPLATE/`.
 
-## Build & Test Commands
-- Install: N/A (workflow repository)
-- Test: N/A (workflows are tested in consuming repos)
-- Lint: `yamllint .github/workflows/` (if configured)
-- Build: N/A
+## CI Checks
+Run `yamllint .github/workflows/` and `bash scripts/ci-smoke.sh github` before pushing workflow changes.
 
-## Architecture
-Key directories:
-- `.github/workflows/` — Reusable workflows (python-ci.yml, dependency-review.yml, node-ci.yml, release.yml, etc.)
-- `.github/actions/` — Composite actions
-- `ISSUE_TEMPLATE/` — Standardized issue templates
-- `profile/` — Organization profile README
-- `templates/` — Project templates
-
-## Conventions
-- Language: YAML (GitHub Actions)
-- Test framework: N/A (validated by consumer repos)
-- CI: Self-hosted workflows consumed by 20+ repos
-- Linting: yamllint (recommended)
-- Reusable workflow pattern with inputs/outputs
+## Issue Workflow
+Open with `github-issues-feature-request` or `github-issues-bug-report`, specify workflow path and repo previously affected when reporting regressions.
