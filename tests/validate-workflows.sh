@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 P=0; F=0
-check() { local d="$1"; shift; if "$@" &>/dev/null; then echo "[PASS] $d"; ((P++)); else echo "[FAIL] $d"; ((F++)); fi; }
+check() { local d="$1"; shift; if "$@" &>/dev/null; then echo "[PASS] $d"; P=$((P+1)); else echo "[FAIL] $d"; F=$((F+1)); fi; }
 echo "=== Workflow Validation ==="
 for wf in python-ci auto-code-review code-review dependency-review stale pr-title-lint; do
   check "Workflow $wf.yml" test -f "$ROOT/.github/workflows/$wf.yml"
