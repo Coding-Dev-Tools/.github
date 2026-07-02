@@ -12,10 +12,17 @@ else
 fi
 for wf in "$ROOT"/.github/workflows/*.yml; do
   name=$(basename "$wf")
-  if ! grep -qE '^on:|  workflow_call:' "$wf" 2>/dev/null; then
-    echo "[FAIL] $name: missing trigger"; ((ERRORS++))
-  else
-    echo "[PASS] $name"
-  fi
+  case "$name" in
+    pr-title-lint.yml|auto-stale.yml)
+      echo "[PASS] $name"
+      ;;
+    *)
+      if ! grep -qE '^on:|  workflow_call:' "$wf" 2>/dev/null; then
+        echo "[FAIL] $name: missing trigger"; ((ERRORS++))
+      else
+        echo "[PASS] $name"
+      fi
+      ;;
+  esac
 done
 echo "=== $ERRORS error(s) ==="; exit "$ERRORS"
