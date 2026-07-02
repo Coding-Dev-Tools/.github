@@ -1,7 +1,7 @@
 # CI for Coding-Dev-Tools/.github — validates reusable workflows
 name: CI
 
-"on":
+on:
   push:
     branches: [main]
   pull_request:
