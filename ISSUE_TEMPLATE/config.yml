@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: DevForge Documentation
-    url: https://coding-dev-tools.github.io/devforge.dev/
+    url: https://coding-dev-tools.github.io/devforge/
     about: Check the documentation, guides, and blog posts
   - name: DevForge Community Discussions
     url: https://github.com/orgs/Coding-Dev-Tools/discussions
