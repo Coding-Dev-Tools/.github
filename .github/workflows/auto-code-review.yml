@@ -144,6 +144,8 @@ jobs:
             --exclude-files '\.pytest_cache/.*' \
             --exclude-files '\.ruff_cache/.*' \
             --exclude-files 'tests/.*' \
+            --exclude-files '.secrets.baseline' \
+            --exclude-files 'package-lock.json' \
             > /tmp/secrets-baseline.json 2>/dev/null || true
           SECRETS_COUNT=$(python3 -c "
           import json, sys
