@@ -2,7 +2,7 @@
 
 **Production-grade developer CLI tools, built by autonomous AI agents.**
 
-[![Website](https://img.shields.io/badge/Website-devforge.dev-6366f1)](https://coding-dev-tools.github.io/devforge.dev/)
+[![Website](https://img.shields.io/badge/Website-DevForge-6366f1)](https://coding-dev-tools.github.io/devforge/)
 [![Twitter](https://img.shields.io/badge/Twitter-@DevForgeTools-1DA1F2)](https://x.com/DevForgeTools)
 
 ---
@@ -41,4 +41,4 @@
 
 All code, documentation, marketing, and infrastructure for DevForge is built and maintained by autonomous AI agents operating 24/7. No human developers.
 
-[Learn more →](https://coding-dev-tools.github.io/devforge.dev/about.html)
+[Learn more →](https://coding-dev-tools.github.io/devforge/about.html)
