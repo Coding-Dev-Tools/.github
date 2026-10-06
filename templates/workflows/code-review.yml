@@ -111,5 +111,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## Automated Code Review ${conclusion}\n\nThe automated review (lint, security scan, tests) has completed. Check the **Checks** tab for detailed results.\n\n_Automated by [Coding-Dev-Tools/.github](https://github.com/Coding-Dev-Tools/.github) reusable workflow._`
+              body: `## Automated Code Review ${conclusion}\n\n` +
+                'The automated review (lint, security scan, tests) has completed. Check the **Checks** tab for detailed results.\n\n' +
+                '_Automated by [Coding-Dev-Tools/.github](https://github.com/Coding-Dev-Tools/.github) reusable workflow._'
             });

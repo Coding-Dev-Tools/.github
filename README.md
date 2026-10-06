@@ -85,7 +85,27 @@ Supported inputs:
 
 ### Auto Code Review
 
-Automated code review for pull requests — runs lint, format, secret detection, TODO markers, and large-file checks, then posts a summary PR comment with a pass/warn/fail verdict.
+Automated code review for pull requests - runs lint, format, secret detection, TODO markers, and large-file checks, then posts a summary PR comment with a pass/warn/fail verdict.
+
+Secret detection uses `detect-secrets==1.5.0` with `--no-verify`. All default detectors
+remain active; candidate credentials are never validated through network requests.
+A scan passes only after a successful
+process and validated JSON with the expected version, plugins, filters, and finding
+schema. Findings, execution errors, invalid or missing evidence, and failed or
+skipped required steps produce a failing verdict. Lint, format, TODO, and file-size
+findings remain warnings. Explicitly disabled optional checks are reported as disabled.
+Reports include safe status and counts; secret values, hashes, and scanner stderr are
+never included. Ruff caches use the runner's temporary directory.
+
+The workflow checks out the caller repository and runs its review code inline.
+The matching template and regression tests exercise these exact YAML run blocks
+in separate caller-like directories, including synthetic findings in source and
+test files. The workflow does not exclude `tests/` or `.secrets.baseline`; generated
+dependency/cache directories and detect-secrets' standard heuristics still apply.
+Passing a scan is not proof that every secret can be detected.
+
+To run the focused regressions, install `PyYAML`, `detect-secrets==1.5.0`, and `ruff`,
+then run `python -m unittest discover -s tests -p 'test_*.py' -v`.
 
 ```yaml
 name: Auto Code Review
