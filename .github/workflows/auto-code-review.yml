@@ -207,9 +207,8 @@ jobs:
                   with default_settings() as settings:
                       expected = settings.json()
                       secret_types = {plugin.secret_type for plugin in get_plugins()}
-                  # The pinned CLI adds its default verification policy and exclusion filter.
+                  # Offline scanning retains every detector and omits network verification.
                   expected['filters_used'].extend([
-                      {'path': 'detect_secrets.filters.common.is_ignored_due_to_verification_policies', 'min_level': 2},
                       {'path': 'detect_secrets.filters.regex.should_exclude_file', 'pattern': [exclusions]},
                   ])
                   expected['filters_used'].sort(key=lambda item: item['path'].lower())
@@ -217,7 +216,7 @@ jobs:
                       baseline = Path(scratch) / 'scan.json'
                       with baseline.open('wb') as output:
                           result = subprocess.run(
-                              [sys.executable, '-I', '-m', 'detect_secrets', 'scan', '--all-files', '--exclude-files', exclusions],
+                              [sys.executable, '-I', '-m', 'detect_secrets', 'scan', '--all-files', '--no-verify', '--exclude-files', exclusions],
                               stdout=output, stderr=subprocess.DEVNULL,
                           )
                       if result.returncode != 0:

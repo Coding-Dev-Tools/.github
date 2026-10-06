@@ -87,7 +87,9 @@ Supported inputs:
 
 Automated code review for pull requests - runs lint, format, secret detection, TODO markers, and large-file checks, then posts a summary PR comment with a pass/warn/fail verdict.
 
-Secret detection uses `detect-secrets==1.5.0`. A scan passes only after a successful
+Secret detection uses `detect-secrets==1.5.0` with `--no-verify`. All default detectors
+remain active; candidate credentials are never validated through network requests.
+A scan passes only after a successful
 process and validated JSON with the expected version, plugins, filters, and finding
 schema. Findings, execution errors, invalid or missing evidence, and failed or
 skipped required steps produce a failing verdict. Lint, format, TODO, and file-size

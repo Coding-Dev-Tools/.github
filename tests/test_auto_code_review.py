@@ -3,6 +3,7 @@
 import ast
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import os
@@ -51,6 +52,7 @@ class InlineWorkflowTests(unittest.TestCase):
                     "detect_secrets",
                     "scan",
                     "--all-files",
+                    "--no-verify",
                     "--exclude-files",
                     cls.exclusions,
                 ],
@@ -454,6 +456,109 @@ class InlineWorkflowTests(unittest.TestCase):
         # Baseline files are not globally hidden by the workflow's exclusions.
         (self.caller / ".secrets.baseline").write_text(marker + "\n", encoding="utf-8")
         self.assertEqual(self.run_block("secrets")[1]["status"], "findings")
+
+    def test_offline_scan_keeps_all_detectors_without_verification_or_network(self):
+        from detect_secrets.settings import default_settings
+
+        with default_settings() as settings:
+            expected_plugins = settings.json()["plugins_used"]
+        self.assertEqual(self.empty["plugins_used"], expected_plugins)
+        self.assertEqual(len(expected_plugins), 27)
+        self.assertNotIn(
+            "detect_secrets.filters.common.is_ignored_due_to_verification_policies",
+            [item["path"] for item in self.empty["filters_used"]],
+        )
+        token = "ghp_" + hashlib.sha256(b"offline GitHub fixture").hexdigest()[:36]
+        aws_id = (
+            "AKIA" + hashlib.sha256(b"offline AWS fixture").hexdigest()[:16].upper()
+        )
+        (self.caller / "source.py").write_text(
+            f'github_token = "{token}"\naws_id = "{aws_id}"\n', encoding="utf-8"
+        )
+        audit = self.runner / "offline-audit.json"
+        # Execute the real CLI with every plugin verifier and network entry blocked.
+        # One core keeps all audit counters in this process on Windows and Linux.
+        guard = """
+import contextlib
+import json
+import sys
+from pathlib import Path
+from unittest.mock import patch
+from detect_secrets.main import main
+from detect_secrets.settings import default_settings, get_plugins
+
+calls = {'verification': 0, 'network': 0}
+def verifier(*args, **kwargs):
+    calls['verification'] += 1
+    raise AssertionError('Verification is forbidden')
+def network(*args, **kwargs):
+    calls['network'] += 1
+    raise AssertionError('Network is forbidden')
+with default_settings():
+    classes = [type(plugin) for plugin in get_plugins()]
+try:
+    with contextlib.ExitStack() as stack:
+        for plugin in classes:
+            stack.enter_context(patch.object(plugin, 'verify', verifier))
+        for entry in ('requests.sessions.Session.request', 'socket.socket.connect',
+                      'socket.socket.connect_ex', 'socket.socket.sendto',
+                      'socket.create_connection', 'socket.getaddrinfo'):
+            stack.enter_context(patch(entry, network))
+        result = main(['--cores', '1', *sys.argv[2:]])
+finally:
+    Path(sys.argv[1]).write_text(json.dumps(calls), encoding='utf-8')
+raise SystemExit(99 if any(calls.values()) else result)
+"""
+        real_run = subprocess.run
+        baselines = []
+        process_codes = []
+
+        def guarded_process(command, **kwargs):
+            self.assertEqual(
+                command[:4], [sys.executable, "-I", "-m", "detect_secrets"]
+            )
+            self.assertIn("--no-verify", command)
+            self.assertFalse(any(arg.startswith("--disable-") for arg in command))
+            completed = real_run(
+                [sys.executable, "-I", "-c", guard, str(audit), *command[4:]], **kwargs
+            )
+            process_codes.append(completed.returncode)
+            if completed.returncode == 0:
+                baselines.append(json.loads(Path(kwargs["stdout"].name).read_bytes()))
+            return completed
+
+        with patch("subprocess.run", side_effect=guarded_process):
+            code, outputs, log = self.run_block("secrets")
+        self.assertEqual(process_codes, [0])
+        self.assertEqual((code, outputs["status"]), (1, "findings"))
+        self.assertEqual(
+            json.loads(audit.read_text()), {"verification": 0, "network": 0}
+        )
+        self.assertEqual(baselines[0]["plugins_used"], expected_plugins)
+        findings = [
+            item for values in baselines[0]["results"].values() for item in values
+        ]
+        self.assertTrue(
+            {"GitHub Token", "AWS Access Key"}.issubset(
+                {item["type"] for item in findings}
+            )
+        )
+        self.assertTrue(all(item["is_verified"] is False for item in findings))
+        self.assertNotIn(token, log)
+        self.assertNotIn(aws_id, log)
+
+    def test_output_with_network_verification_filter_is_rejected(self):
+        data = copy.deepcopy(self.empty)
+        data["filters_used"].append(
+            {
+                "path": "detect_secrets.filters.common.is_ignored_due_to_verification_policies",
+                "min_level": 2,
+            }
+        )
+        data["filters_used"].sort(key=lambda item: item["path"].lower())
+        self.assertEqual(
+            self.run_block("secrets", fixture=data)[:2], (1, {"status": "error"})
+        )
 
     def test_caller_module_cannot_shadow_the_installed_scanner(self):
         shadow = self.caller / "detect_secrets"
