@@ -19,8 +19,8 @@
 # Supported inputs:
 #   python-version    – Python version for lint tools (default: '3.12')
 #   ruff-targets      – Paths ruff should scan (default: '.')
-#   detect-secrets    – Run detect-secrets scan (default: true)
-#   check-todos       – Fail on leftover TODO/FIXME/HACK (default: false)
+#   detect-secrets    – Run detect-secrets credential scan (default: true)
+#   check-todos       – Warn on leftover TODO/FIXME/HACK (default: false)
 #   max-file-size     – Fail if any file exceeds N KB (default: 500)
 #   post-comment      – Post summary PR comment (default: true)
 
@@ -45,7 +45,7 @@ on:
         required: false
         default: true
       check-todos:
-        description: Fail on leftover TODO/FIXME/HACK markers
+        description: Warn on leftover TODO/FIXME/HACK markers
         type: boolean
         required: false
         default: false
@@ -73,161 +73,258 @@ jobs:
   review:
     name: Automated code review
     runs-on: ubuntu-latest
+    env:
+      RUFF_CACHE_DIR: ${{ runner.temp }}/ruff-cache
+      REVIEW_DIR: ${{ runner.temp }}/code-review
 
     steps:
       # ── Checkout ──────────────────────────────────────────────
       - name: Checkout PR head
+        id: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python ${{ inputs.python-version }}
+        id: python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
 
       # ── Ruff lint + format check ──────────────────────────────
       - name: Install ruff
-        run: pip install ruff
+        id: install-ruff
+        run: python -m pip install ruff
 
       - name: Ruff lint
         id: ruff-lint
         continue-on-error: true
+        shell: python
+        env:
+          RUFF_TARGETS: ${{ inputs.ruff-targets }}
         run: |
-          # Run with --exit-zero so the step never fails the job
-          ruff check ${{ inputs.ruff-targets }} \
-            --output-format=github \
-            --exit-zero \
-            | tee /tmp/ruff-lint.txt
-          # Produce JSON for issue counting in the summary
-          ruff check ${{ inputs.ruff-targets }} --exit-zero --output-format=json > /tmp/ruff-lint.json 2>/dev/null || true
-          # Determine if there are any issues
-          RUFF_COUNT=$(python3 -c "
-          import json, sys
+          import json
+          import os
+          import shlex
+          import subprocess
+          from pathlib import Path
+
+          status, count = 'error', None
           try:
-              data = json.load(open('/tmp/ruff-lint.json'))
-              print(len(data))
+              result = subprocess.run(
+                  ['ruff', 'check', *shlex.split(os.environ['RUFF_TARGETS']),
+                   '--exit-zero', '--output-format=json', '--cache-dir', os.environ['RUFF_CACHE_DIR']],
+                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+              )
+              findings = json.loads(result.stdout)
+              if not isinstance(findings, list) or any(not isinstance(item, dict) for item in findings):
+                  raise ValueError('Invalid lint output')
+              count = len(findings)
+              status = 'complete'
           except Exception:
-              print(0)
-          ")
-          echo "count=$RUFF_COUNT" >> "$GITHUB_OUTPUT"
-          if [ "$RUFF_COUNT" -gt 0 ]; then
-            echo "has_issues=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_issues=false" >> "$GITHUB_OUTPUT"
-          fi
+              print('Ruff lint could not complete; review fails closed.')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write(f'status={status}\n')
+              if count is not None:
+                  output.write(f'count={count}\nhas_issues={str(count > 0).lower()}\n')
+          raise SystemExit(0 if status == 'complete' else 1)
 
       - name: Ruff format check
         id: ruff-format
         continue-on-error: true
+        shell: python
+        env:
+          RUFF_TARGETS: ${{ inputs.ruff-targets }}
         run: |
-          if ruff format --check ${{ inputs.ruff-targets }} > /tmp/ruff-format.txt 2>&1; then
-            echo "has_issues=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_issues=true" >> "$GITHUB_OUTPUT"
-          fi
+          import os
+          import shlex
+          import subprocess
+          from pathlib import Path
 
-      # ── Secret detection ──────────────────────────────────────
+          status, has_issues = 'error', None
+          try:
+              result = subprocess.run(
+                  ['ruff', 'format', '--check', *shlex.split(os.environ['RUFF_TARGETS']),
+                   '--cache-dir', os.environ['RUFF_CACHE_DIR']],
+                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+              )
+              if result.returncode not in (0, 1):
+                  raise ValueError('Format check failed')
+              status, has_issues = 'complete', result.returncode == 1
+          except Exception:
+              print('Ruff format could not complete; review fails closed.')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write(f'status={status}\n')
+              if has_issues is not None:
+                  output.write(f'has_issues={str(has_issues).lower()}\n')
+          raise SystemExit(0 if status == 'complete' else 1)
+
       - name: Install detect-secrets
+        id: install-secrets
         if: inputs.detect-secrets
-        run: pip install detect-secrets
+        run: python -m pip install detect-secrets==1.5.0
 
       - name: Scan for secrets
         id: secrets
         if: inputs.detect-secrets
         continue-on-error: true
+        shell: python
         run: |
-          detect-secrets scan --all-files \
-            --exclude-files '\.git/.*' \
-            --exclude-files 'node_modules/.*' \
-            --exclude-files '\.venv/.*' \
-            > /tmp/secrets-baseline.json 2>/dev/null || true
-          SECRETS_COUNT=$(python3 -c "
-          import json, sys
-          try:
-              data = json.load(open('/tmp/secrets-baseline.json'))
-              total = sum(len(v) for v in data.get('results', {}).values())
-              print(total)
-          except Exception:
-              print(0)
-          ")
-          echo "count=$SECRETS_COUNT" >> "$GITHUB_OUTPUT"
-          if [ "$SECRETS_COUNT" -gt 0 ]; then
-            echo "has_issues=true" >> "$GITHUB_OUTPUT"
-            python3 -c "
+          import contextlib
+          import importlib.metadata
           import json
-          data = json.load(open('/tmp/secrets-baseline.json'))
-          for filepath, findings in data.get('results', {}).items():
-              for f in findings:
-                  print(f'  {filepath}:{f[\"line_number\"]} — {f[\"type\"]}')
-          " | tee /tmp/secrets-report.txt
-          else
-            echo "has_issues=false" >> "$GITHUB_OUTPUT"
-            echo "No secrets detected." > /tmp/secrets-report.txt
-          fi
+          import os
+          import re
+          import subprocess
+          import sys
+          import tempfile
+          from datetime import datetime
+          from pathlib import Path, PurePosixPath
+
+          # All code is inline: checkout contains the caller, not this shared repo.
+          # Only generated dependency/cache directories are excluded, including nested ones.
+          exclusions = r'(^|/)(\.git|node_modules|\.venv|__pycache__|\.pytest_cache)/'
+          status, count = 'error', None
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError('Duplicate JSON key')
+                  result[key] = value
+              return result
+
+          def invalid_constant(value):
+              raise ValueError('Invalid JSON constant')
+
+          try:
+              # Never expose exception messages, scanner stderr, hashes, or values.
+              with open(os.devnull, 'w') as quiet, contextlib.redirect_stderr(quiet):
+                  from detect_secrets.settings import default_settings, get_plugins
+
+                  if importlib.metadata.version('detect-secrets') != '1.5.0':
+                      raise ValueError('Unsupported scanner version')
+                  with default_settings() as settings:
+                      expected = settings.json()
+                      secret_types = {plugin.secret_type for plugin in get_plugins()}
+                  # The pinned CLI adds its default verification policy and exclusion filter.
+                  expected['filters_used'].extend([
+                      {'path': 'detect_secrets.filters.common.is_ignored_due_to_verification_policies', 'min_level': 2},
+                      {'path': 'detect_secrets.filters.regex.should_exclude_file', 'pattern': [exclusions]},
+                  ])
+                  expected['filters_used'].sort(key=lambda item: item['path'].lower())
+                  with tempfile.TemporaryDirectory(dir=os.environ['RUNNER_TEMP']) as scratch:
+                      baseline = Path(scratch) / 'scan.json'
+                      with baseline.open('wb') as output:
+                          result = subprocess.run(
+                              [sys.executable, '-I', '-m', 'detect_secrets', 'scan', '--all-files', '--exclude-files', exclusions],
+                              stdout=output, stderr=subprocess.DEVNULL,
+                          )
+                      if result.returncode != 0:
+                          raise ValueError('Scanner did not complete')
+                      data = json.loads(
+                          baseline.read_text(encoding='utf-8'),
+                          object_pairs_hook=unique_object, parse_constant=invalid_constant,
+                      )
+                  required = {'version', 'plugins_used', 'filters_used', 'results', 'generated_at'}
+                  if not isinstance(data, dict) or set(data) != required or data['version'] != '1.5.0':
+                      raise ValueError('Invalid scan schema or version')
+                  if data['plugins_used'] != expected['plugins_used'] or not data['plugins_used']:
+                      raise ValueError('Invalid scanner plugins')
+                  if data['filters_used'] != expected['filters_used']:
+                      raise ValueError('Invalid scanner filters')
+                  datetime.strptime(data['generated_at'], '%Y-%m-%dT%H:%M:%SZ')
+                  if not isinstance(data['results'], dict):
+                      raise ValueError('Invalid scan results')
+                  total = 0
+                  for filename, findings in data['results'].items():
+                      if not isinstance(filename, str) or not filename or '\x00' in filename:
+                          raise ValueError('Invalid filename')
+                      path = PurePosixPath(filename)
+                      if path.is_absolute() or '..' in path.parts or not isinstance(findings, list):
+                          raise ValueError('Invalid finding collection')
+                      for finding in findings:
+                          fields = {'type', 'filename', 'hashed_secret', 'is_verified', 'line_number'}
+                          if not isinstance(finding, dict) or set(finding) != fields:
+                              raise ValueError('Invalid finding schema')
+                          if finding['filename'] != filename or finding['type'] not in secret_types:
+                              raise ValueError('Invalid finding metadata')
+                          if type(finding['line_number']) is not int or finding['line_number'] < 1:
+                              raise ValueError('Invalid finding location')
+                          if type(finding['is_verified']) is not bool:
+                              raise ValueError('Invalid finding verification')
+                          if not isinstance(finding['hashed_secret'], str) or not re.fullmatch(r'[a-f0-9]{40}', finding['hashed_secret']):
+                              raise ValueError('Invalid finding hash')
+                          total += 1
+                  count = total
+                  status = 'findings' if count else 'clean'
+          except Exception:
+              print('Secret scan could not be validated; review fails closed.')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write(f'status={status}\n')
+              if count is not None:
+                  output.write(f'count={count}\nhas_issues={str(count > 0).lower()}\n')
+          print('Secret scan status: ' + status)
+          raise SystemExit(0 if status == 'clean' else 1)
 
       # ── TODO / FIXME / HACK check ─────────────────────────────
       - name: Check for leftover TODO/FIXME/HACK
         id: todos
         if: inputs.check-todos
         continue-on-error: true
+        shell: python
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Only check files changed in the PR
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          if [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
-            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.py' '*.js' '*.ts' '*.tsx' '*.rs' '*.go' 2>/dev/null || git diff --name-only HEAD~1 -- '*.py' '*.js' '*.ts' '*.tsx' '*.rs' '*.go')
-          else
-            CHANGED_FILES=$(git diff --name-only HEAD~1 -- '*.py' '*.js' '*.ts' '*.tsx' '*.rs' '*.go' 2>/dev/null || echo "")
-          fi
-          TODO_COUNT=0
-          TODO_REPORT=""
-          for f in $CHANGED_FILES; do
-            if [ -f "$f" ]; then
-              MATCHES=$(grep -nE '(TODO|FIXME|HACK|XXX):' "$f" 2>/dev/null || true)
-              if [ -n "$MATCHES" ]; then
-                COUNT=$(echo "$MATCHES" | wc -l)
-                TODO_COUNT=$((TODO_COUNT + COUNT))
-                TODO_REPORT="${TODO_REPORT}
-            ${f}:
-              ${MATCHES}"
-              fi
-            fi
-          done
-          echo "count=$TODO_COUNT" >> "$GITHUB_OUTPUT"
-          if [ "$TODO_COUNT" -gt 0 ]; then
-            echo "has_issues=true" >> "$GITHUB_OUTPUT"
-            echo -e "Found ${TODO_COUNT} TODO/FIXME/HACK marker(s):\n${TODO_REPORT}" > /tmp/todos-report.txt
-          else
-            echo "has_issues=false" >> "$GITHUB_OUTPUT"
-            echo "No leftover TODO/FIXME/HACK markers." > /tmp/todos-report.txt
-          fi
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
 
-      # ── Large file check ──────────────────────────────────────
+          base, head = os.environ.get('BASE_SHA'), os.environ.get('HEAD_SHA')
+          refs = [base, head] if base and head else ['HEAD~1']
+          result = subprocess.run(
+              ['git', 'diff', '--name-only', '-z', *refs, '--',
+               '*.py', '*.js', '*.ts', '*.tsx', '*.rs', '*.go'],
+              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+          )
+          count = 0
+          for filename in os.fsdecode(result.stdout).split('\x00'):
+              if filename and Path(filename).is_file():
+                  text = Path(filename).read_text(encoding='utf-8')
+                  count += sum(bool(re.search(r'(TODO|FIXME|HACK|XXX):', line)) for line in text.splitlines())
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write(f'count={count}\nhas_issues={str(count > 0).lower()}\n')
+
       - name: Check for oversized files
         id: large-files
         if: inputs.max-file-size > 0
         continue-on-error: true
+        shell: python
+        env:
+          MAX_FILE_SIZE: ${{ inputs.max-file-size }}
         run: |
-          THRESHOLD=$((inputs.max-file-size * 1024))
-          LARGE_FILES=$(find . -type f -size +${THRESHOLD}c \
-            -not -path './.git/*' \
-            -not -path './node_modules/*' \
-            -not -path './.venv/*' \
-            -not -path './__pycache__/*' \
-            -not -path '*/package-lock.json' \
-            -not -path '*/pnpm-lock.yaml' \
-            -not -path '*.lock' \
-            2>/dev/null || true)
-          if [ -n "$LARGE_FILES" ]; then
-            echo "has_issues=true" >> "$GITHUB_OUTPUT"
-            echo -e "Oversized files (>${{ inputs.max-file-size }} KB):\n${LARGE_FILES}" > /tmp/large-files-report.txt
-          else
-            echo "has_issues=false" >> "$GITHUB_OUTPUT"
-            echo "No oversized files." > /tmp/large-files-report.txt
-          fi
+          import os
+          from pathlib import Path
 
-      # ── Diff stats ────────────────────────────────────────────
+          threshold = float(os.environ['MAX_FILE_SIZE']) * 1024
+          large = False
+
+          def walk_error(error):
+              raise error
+
+          for directory, dirs, files in os.walk('.', onerror=walk_error):
+              if directory == '.':
+                  dirs[:] = [name for name in dirs if name not in ('.git', 'node_modules', '.venv', '__pycache__')]
+              for filename in files:
+                  if filename in ('package-lock.json', 'pnpm-lock.yaml') or filename.endswith('.lock'):
+                      continue
+                  if (Path(directory) / filename).stat().st_size > threshold:
+                      large = True
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write(f'has_issues={str(large).lower()}\n')
+
       - name: Gather diff stats
         id: diff-stats
         run: |
@@ -245,122 +342,99 @@ jobs:
       # ── Build summary ─────────────────────────────────────────
       - name: Build review summary
         id: summary
+        if: ${{ always() }}
+        shell: python
+        env:
+          REVIEW_STEPS: ${{ toJSON(steps) }}
+          SCAN_ENABLED: ${{ inputs.detect-secrets }}
+          TODOS_ENABLED: ${{ inputs.check-todos }}
+          MAX_FILE_SIZE: ${{ inputs.max-file-size }}
         run: |
-          cat > /tmp/review-summary.md << 'HEADER'
-          ## 🤖 Automated Code Review
+          import json
+          import os
+          import re
+          from pathlib import Path
 
-          HEADER
+          errors, warnings = [], []
+          lines = ['## Automated Code Review', '']
+          try:
+              steps = json.loads(os.environ['REVIEW_STEPS'])
+              if not isinstance(steps, dict):
+                  raise ValueError('Invalid step metadata')
+              scan_enabled = os.environ['SCAN_ENABLED'] == 'true'
+              todos_enabled = os.environ['TODOS_ENABLED'] == 'true'
+              if os.environ['SCAN_ENABLED'] not in ('true', 'false') or os.environ['TODOS_ENABLED'] not in ('true', 'false'):
+                  raise ValueError('Invalid review inputs')
+              required = ['checkout', 'python', 'install-ruff', 'ruff-lint', 'ruff-format']
+              if scan_enabled:
+                  required += ['install-secrets', 'secrets']
+              if todos_enabled:
+                  required += ['todos']
+              if float(os.environ['MAX_FILE_SIZE']) > 0:
+                  required += ['large-files']
+              for name in required:
+                  if steps.get(name, {}).get('outcome') != 'success':
+                      errors.append(name)
 
-          # Ruff lint
-          RUFF_LINT_ISSUES=${{ steps.ruff-lint.outputs.count || '0' }}
-          if [ "$RUFF_LINT_ISSUES" -gt 0 ]; then
-            echo "### ⚠️ Ruff Lint — ${RUFF_LINT_ISSUES} issue(s)" >> /tmp/review-summary.md
-            echo '```' >> /tmp/review-summary.md
-            head -50 /tmp/ruff-lint.txt >> /tmp/review-summary.md
-            echo '```' >> /tmp/review-summary.md
-            echo "" >> /tmp/review-summary.md
-          else
-            echo "### ✅ Ruff Lint — No issues" >> /tmp/review-summary.md
-            echo "" >> /tmp/review-summary.md
-          fi
+              def outputs(name, counted=False):
+                  data = steps.get(name, {}).get('outputs', {})
+                  if data.get('has_issues') not in ('true', 'false'):
+                      raise ValueError('Missing issue output')
+                  if counted:
+                      if not re.fullmatch(r'0|[1-9][0-9]*', data.get('count', '')):
+                          raise ValueError('Missing count output')
+                      if (int(data['count']) > 0) != (data['has_issues'] == 'true'):
+                          raise ValueError('Inconsistent count output')
+                  return data
 
-          # Ruff format
-          if [ "${{ steps.ruff-format.outputs.has_issues }}" = "true" ]; then
-            echo "### ⚠️ Ruff Format — Formatting needed" >> /tmp/review-summary.md
-            echo '```' >> /tmp/review-summary.md
-            head -30 /tmp/ruff-format.txt >> /tmp/review-summary.md
-            echo '```' >> /tmp/review-summary.md
-            echo "" >> /tmp/review-summary.md
-          else
-            echo "### ✅ Ruff Format — Clean" >> /tmp/review-summary.md
-            echo "" >> /tmp/review-summary.md
-          fi
-
-          # Secrets
-          if [ "${{ inputs.detect-secrets }}" = "true" ]; then
-            SECRETS_COUNT=${{ steps.secrets.outputs.count || '0' }}
-            if [ "$SECRETS_COUNT" -gt 0 ]; then
-              echo "### 🔴 Secret Detection — ${SECRETS_COUNT} potential secret(s)" >> /tmp/review-summary.md
-              echo '```' >> /tmp/review-summary.md
-              cat /tmp/secrets-report.txt >> /tmp/review-summary.md
-              echo '```' >> /tmp/review-summary.md
-              echo "" >> /tmp/review-summary.md
-            else
-              echo "### ✅ Secret Detection — Clean" >> /tmp/review-summary.md
-              echo "" >> /tmp/review-summary.md
-            fi
-          fi
-
-          # TODOs
-          if [ "${{ inputs.check-todos }}" = "true" ]; then
-            TODO_COUNT=${{ steps.todos.outputs.count || '0' }}
-            if [ "$TODO_COUNT" -gt 0 ]; then
-              echo "### ⚠️ TODO/FIXME/HACK — ${TODO_COUNT} marker(s)" >> /tmp/review-summary.md
-              echo '```' >> /tmp/review-summary.md
-              cat /tmp/todos-report.txt >> /tmp/review-summary.md
-              echo '```' >> /tmp/review-summary.md
-              echo "" >> /tmp/review-summary.md
-            else
-              echo "### ✅ TODO/FIXME/HACK — Clean" >> /tmp/review-summary.md
-              echo "" >> /tmp/review-summary.md
-            fi
-          fi
-
-          # Large files
-          if [ "${{ inputs.max-file-size }}" -gt 0 ]; then
-            if [ -f /tmp/large-files-report.txt ] && grep -q "Oversized" /tmp/large-files-report.txt 2>/dev/null; then
-              echo "### ⚠️ Large Files — Exceeds ${{ inputs.max-file-size }} KB limit" >> /tmp/review-summary.md
-              echo '```' >> /tmp/review-summary.md
-              cat /tmp/large-files-report.txt >> /tmp/review-summary.md
-              echo '```' >> /tmp/review-summary.md
-              echo "" >> /tmp/review-summary.md
-            else
-              echo "### ✅ Large Files — Within limits" >> /tmp/review-summary.md
-              echo "" >> /tmp/review-summary.md
-            fi
-          fi
-
-          # Diff stats
-          echo "### 📊 Diff Stats — ${{ steps.diff-stats.outputs.files_changed }} file(s) changed" >> /tmp/review-summary.md
-          echo '```' >> /tmp/review-summary.md
-          cat /tmp/diff-stats.txt >> /tmp/review-summary.md
-          echo '```' >> /tmp/review-summary.md
-          echo "" >> /tmp/review-summary.md
-
-          # Overall verdict
-          HAS_SECRET_ISSUES="${{ steps.secrets.outputs.has_issues || 'false' }}"
-          HAS_RUFF_LINT="${{ steps.ruff-lint.outputs.has_issues || 'false' }}"
-          HAS_RUFF_FORMAT="${{ steps.ruff-format.outputs.has_issues || 'false' }}"
-          HAS_TODOS="${{ steps.todos.outputs.has_issues || 'false' }}"
-          HAS_LARGE="${{ steps.large-files.outputs.has_issues || 'false' }}"
-
-          echo "---" >> /tmp/review-summary.md
-          if [ "$HAS_SECRET_ISSUES" = "true" ]; then
-            echo "**Verdict: 🔴 Changes Requested** — Potential secrets detected. Do not merge." >> /tmp/review-summary.md
-            echo "overall=fail" >> "$GITHUB_OUTPUT"
-          elif [ "$HAS_RUFF_LINT" = "true" ] || [ "$HAS_RUFF_FORMAT" = "true" ]; then
-            echo "**Verdict: ⚠️ Warnings** — Lint/format issues found. Recommend fixing before merge." >> /tmp/review-summary.md
-            echo "overall=warn" >> "$GITHUB_OUTPUT"
-          elif [ "$HAS_TODOS" = "true" ] || [ "$HAS_LARGE" = "true" ]; then
-            echo "**Verdict: ⚠️ Warnings** — Non-blocking issues found. See details above." >> /tmp/review-summary.md
-            echo "overall=warn" >> "$GITHUB_OUTPUT"
-          else
-            echo "**Verdict: ✅ Pass** — No issues found." >> /tmp/review-summary.md
-            echo "overall=pass" >> "$GITHUB_OUTPUT"
-          fi
-          echo "" >> /tmp/review-summary.md
-          echo "_Automated by [Coding-Dev-Tools/.github](https://github.com/Coding-Dev-Tools/.github) reusable workflow._" >> /tmp/review-summary.md
-
-          cat /tmp/review-summary.md
+              lint = outputs('ruff-lint', counted=True)
+              fmt = outputs('ruff-format')
+              if lint.get('status') != 'complete' or fmt.get('status') != 'complete':
+                  raise ValueError('Incomplete lint/format check')
+              lines.append(f"### Ruff lint: {lint['count']} issue(s)")
+              lines.append('### Ruff format: ' + ('Formatting needed' if fmt['has_issues'] == 'true' else 'Clean'))
+              if lint['has_issues'] == 'true' or fmt['has_issues'] == 'true':
+                  warnings.append('Lint/format issues')
+              if scan_enabled:
+                  secrets = outputs('secrets', counted=True)
+                  expected_status = 'findings' if secrets['has_issues'] == 'true' else 'clean'
+                  if secrets.get('status') != expected_status:
+                      raise ValueError('Unvalidated secret scan')
+                  lines.append(f"### Secret detection: {secrets['count']} potential secret(s)")
+                  if expected_status == 'findings':
+                      errors.append('Potential secrets detected')
+              else:
+                  lines.append('### Secret detection: Disabled by caller')
+              for name, enabled, counted in [
+                  ('todos', todos_enabled, True),
+                  ('large-files', float(os.environ['MAX_FILE_SIZE']) > 0, False),
+              ]:
+                  if enabled and outputs(name, counted)['has_issues'] == 'true':
+                      warnings.append(name)
+              lines.extend(['', 'Warnings: ' + ', '.join(warnings)] if warnings else [])
+          except Exception:
+              errors.append('Required review evidence is missing or invalid')
+          verdict = 'fail' if errors else ('warn' if warnings else 'pass')
+          if errors:
+              lines.extend(['', 'Review incomplete or critical issues found: ' + ', '.join(errors)])
+          lines.extend(['', '**Verdict: ' + verdict.upper() + '**', '',
+                        '_Automated by [Coding-Dev-Tools/.github](https://github.com/Coding-Dev-Tools/.github) reusable workflow._'])
+          body = '\n'.join(lines) + '\n'
+          report = Path(os.environ['REVIEW_DIR'])
+          report.mkdir(parents=True, exist_ok=True)
+          (report / 'review-summary.md').write_text(body, encoding='utf-8')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write(f'overall={verdict}\n')
+          print(body)
 
       # ── Post PR comment ───────────────────────────────────────
       - name: Post review comment
-        if: inputs.post-comment && github.event.pull_request.number != ''
+        if: always() && steps.summary.outcome == 'success' && inputs.post-comment && github.event.pull_request.number != ''
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('/tmp/review-summary.md', 'utf8');
+            const body = fs.readFileSync(`${process.env.REVIEW_DIR}/review-summary.md`, 'utf8');
             const pr_number = context.payload.pull_request.number;
 
             // Check for existing bot comment to update instead of duplicating
@@ -371,7 +445,7 @@ jobs:
             });
             const botComment = comments.data.find(c =>
               c.user.type === 'Bot' &&
-              c.body.includes('🤖 Automated Code Review')
+              c.body.includes('Automated Code Review')
             );
 
             if (botComment) {
@@ -390,10 +464,16 @@ jobs:
 
       # ── Fail workflow on critical issues ──────────────────────
       - name: Check verdict
+        if: ${{ always() }}
+        shell: python
+        env:
+          SUMMARY_OUTCOME: ${{ steps.summary.outcome }}
+          VERDICT: ${{ steps.summary.outputs.overall }}
         run: |
-          VERDICT="${{ steps.summary.outputs.overall }}"
-          echo "Overall verdict: $VERDICT"
-          if [ "$VERDICT" = "fail" ]; then
-            echo "Failing workflow due to critical issues (secrets detected)."
-            exit 1
-          fi
+          import os
+
+          verdict = os.environ.get('VERDICT', '')
+          if os.environ.get('SUMMARY_OUTCOME') != 'success' or verdict not in ('pass', 'warn'):
+              print('Review failed or required evidence is unavailable.')
+              raise SystemExit(1)
+          print('Overall verdict: ' + verdict)
