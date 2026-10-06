@@ -607,6 +607,36 @@ raise SystemExit(99 if any(calls.values()) else result)
         with self.assertRaises(subprocess.CalledProcessError):
             self.run_block("todos", env={"BASE_SHA": "missing", "HEAD_SHA": "missing"})
 
+    def test_oversized_check_ignores_symlinks_and_still_checks_regular_files(self):
+        # Model a dangling link on platforms where creating symlinks is restricted.
+        target = self.caller / "dangling-link"
+        target.write_bytes(b"x" * 2048)
+        original = Path.is_symlink
+        with patch.object(
+            Path,
+            "is_symlink",
+            lambda path: path.name == "dangling-link" or original(path),
+        ):
+            self.assertEqual(
+                self.run_block("large-files", env={"MAX_FILE_SIZE": "1"})[:2],
+                (0, {"has_issues": "false"}),
+            )
+            (self.caller / "regular.bin").write_bytes(b"x" * 1025)
+            self.assertEqual(
+                self.run_block("large-files", env={"MAX_FILE_SIZE": "1"})[:2],
+                (0, {"has_issues": "true"}),
+            )
+
+    @unittest.skipIf(
+        os.name == "nt", "Native symlink fixture is exercised by Ubuntu CI"
+    )
+    def test_real_dangling_symlink_does_not_fail_oversized_check(self):
+        (self.caller / "dangling-link").symlink_to("missing-target")
+        self.assertEqual(
+            self.run_block("large-files", env={"MAX_FILE_SIZE": "1"})[:2],
+            (0, {"has_issues": "false"}),
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

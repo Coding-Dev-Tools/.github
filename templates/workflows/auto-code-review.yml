@@ -319,7 +319,10 @@ jobs:
               for filename in files:
                   if filename in ('package-lock.json', 'pnpm-lock.yaml') or filename.endswith('.lock'):
                       continue
-                  if (Path(directory) / filename).stat().st_size > threshold:
+                  path = Path(directory) / filename
+                  if path.is_symlink():
+                      continue
+                  if path.stat().st_size > threshold:
                       large = True
           with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
               output.write(f'has_issues={str(large).lower()}\n')
