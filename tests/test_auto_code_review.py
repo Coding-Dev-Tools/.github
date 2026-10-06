@@ -190,10 +190,6 @@ class InlineWorkflowTests(unittest.TestCase):
 
     def test_active_and_template_are_identical_and_self_contained(self):
         self.assertEqual(WORKFLOWS[0].read_bytes(), WORKFLOWS[1].read_bytes())
-        review = self.workflows[0]["jobs"]["review"]
-        self.assertEqual(
-            review["env"]["RUFF_CACHE_DIR"], "${{ runner.temp }}/ruff-cache"
-        )
         self.assertEqual(self.steps["checkout"]["uses"], "actions/checkout@v4")
         self.assertNotIn("repository", self.steps["checkout"].get("with", {}))
         self.assertIn("detect-secrets==1.5.0", self.steps["install-secrets"]["run"])
@@ -205,6 +201,58 @@ class InlineWorkflowTests(unittest.TestCase):
                 self.assertNotIn("${{", step["run"])
                 self.assertNotIn("scripts/", step["run"])
         self.assertFalse((self.caller / "scripts").exists())
+
+    def test_runner_paths_use_supported_step_contexts(self):
+        # GitHub rejects runner.* in jobs.<job_id>.env before creating any jobs.
+        for workflow in self.workflows:
+            job = workflow["jobs"]["review"]
+            self.assertNotIn("runner.", json.dumps(job.get("env", {})))
+            steps = {step.get("id", step["name"]): step for step in job["steps"]}
+            for name in ("ruff-lint", "ruff-format"):
+                self.assertEqual(
+                    steps[name]["env"]["RUFF_CACHE_DIR"],
+                    "${{ runner.temp }}/ruff-cache",
+                )
+            for name in ("summary", "Post review comment"):
+                self.assertEqual(
+                    steps[name]["env"]["REVIEW_DIR"],
+                    "${{ runner.temp }}/code-review",
+                )
+
+    @unittest.skipUnless(
+        os.environ.get("ACTIONLINT_BIN"), "actionlint is required by CI"
+    )
+    def test_actions_validator_rejects_the_original_job_runner_context(self):
+        command = [os.environ["ACTIONLINT_BIN"], "-shellcheck=", "-pyflakes="]
+        valid = subprocess.run(
+            command + [str(path) for path in WORKFLOWS],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+        invalid = (
+            WORKFLOWS[0]
+            .read_text(encoding="utf-8")
+            .replace(
+                "    runs-on: ubuntu-latest\n",
+                "    runs-on: ubuntu-latest\n"
+                "    env:\n"
+                "      RUFF_CACHE_DIR: ${{ runner.temp }}/ruff-cache\n",
+                1,
+            )
+        )
+        rejected = subprocess.run(
+            command + ["-"],
+            input=invalid,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("runner", rejected.stdout + rejected.stderr)
 
     def test_valid_empty_scan_passes(self):
         code, outputs, _ = self.run_block("secrets", fixture=self.empty)

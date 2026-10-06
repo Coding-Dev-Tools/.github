@@ -106,6 +106,10 @@ Passing a scan is not proof that every secret can be detected.
 
 To run the focused regressions, install `PyYAML`, `detect-secrets==1.5.0`, and `ruff`,
 then run `python -m unittest discover -s tests -p 'test_*.py' -v`.
+CI also validates the active review workflow, template, and CI workflow with
+checksum-verified actionlint 1.7.12. To run the validator regression locally, set
+`ACTIONLINT_BIN` to the installed binary; it verifies that the shipped workflows
+pass and that the original unsupported job-level `runner.temp` context fails.
 
 ```yaml
 name: Auto Code Review
