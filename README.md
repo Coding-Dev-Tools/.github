@@ -104,6 +104,27 @@ test files. The workflow does not exclude `tests/` or `.secrets.baseline`; gener
 dependency/cache directories and detect-secrets' standard heuristics still apply.
 Passing a scan is not proof that every secret can be detected.
 
+The scanner can recognize verified checksums in the legacy
+`migration-preservation/<machine>/<timestamp>/PRESERVATION.json` capsule format.
+It accepts only hexadecimal entropy findings at the exact canonical JSON locations
+of archive SHA256/Git blob identities and checkout commit IDs. The complete,
+known manifest schema must match the caller repository. Manifest and ZIP bytes
+must match regular files tracked at `HEAD`; ZIP lengths, SHA256, Git blob identities,
+unique safe entry paths, CRCs, exact entry sets, and every source file's length and
+SHA256 must agree. Each original checkout must exist as a commit and be an ancestor
+of `HEAD`, and archived source metadata must refer to that checkout and branch.
+Git reads prohibit network transport, lazy fetching, replacement objects, and
+grafted history. Missing Git objects, shallow-history proof gaps, unknown schemas,
+malformed JSON, and any other validation failure fail the review.
+
+This recognition is bounded to 1 MiB manifests, 32 ZIPs of at most 64 MiB each,
+128 checkouts, and 255 source files per ZIP. Each ZIP has at most 128 MiB of
+uncompressed content and each entry at most 8 MiB. It does not extract or execute
+archived content. Unknown capsule formats receive no exemption. A field name or
+hexadecimal string alone cannot qualify; another detector or an occurrence outside
+the verified fields remains a finding, including tokens deduplicated by the scanner.
+All 27 detectors and their default filters remain unchanged.
+
 To run the focused regressions, install `PyYAML`, `detect-secrets==1.5.0`, and `ruff`,
 then run `python -m unittest discover -s tests -p 'test_*.py' -v`.
 CI also validates the active review workflow, template, and CI workflow with

@@ -170,7 +170,9 @@ jobs:
         shell: python
         run: |
           import contextlib
+          import hashlib
           import importlib.metadata
+          import io
           import json
           import os
           import re
@@ -178,7 +180,8 @@ jobs:
           import sys
           import tempfile
           from datetime import datetime
-          from pathlib import Path, PurePosixPath
+          from pathlib import Path, PurePosixPath, PureWindowsPath
+          from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
           # All code is inline: checkout contains the caller, not this shared repo.
           # Only generated dependency/cache directories are excluded, including nested ones.
@@ -195,6 +198,160 @@ jobs:
 
           def invalid_constant(value):
               raise ValueError('Invalid JSON constant')
+
+          def require(condition):
+              if not condition:
+                  raise ValueError('Preservation evidence could not be verified')
+
+          def schema(value, fields):
+              require(isinstance(value, dict) and set(value) == set(fields.split()))
+
+          def text_field(value, limit=4096):
+              require(isinstance(value, str) and 0 < len(value) <= limit)
+              require(all(ord(char) >= 32 and ord(char) != 127 for char in value))
+
+          def safe_path(value):
+              text_field(value, 512)
+              path = PurePosixPath(value)
+              require(path.parts and not path.is_absolute() and str(path) == value)
+              require(not {'..', '.'}.intersection(path.parts) and '\\' not in value and ':' not in value)
+              return path
+
+          def git_evidence(*arguments):
+              # Never lazily fetch an object or use replacement/graft history as proof.
+              environment = dict(os.environ, GIT_NO_LAZY_FETCH='1', GIT_TERMINAL_PROMPT='0', GIT_GRAFT_FILE=os.devnull)
+              result = subprocess.run(
+                  ['git', '--no-replace-objects', '-c', 'protocol.allow=never', *arguments],
+                  env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                  timeout=15, check=True,
+              )
+              return result.stdout
+
+          def tracked_bytes(filename, limit):
+              path = Path(*safe_path(filename).parts)
+              require(not any(parent.is_symlink() for parent in (path, *path.parents)))
+              require(path.is_file() and path.stat().st_size <= limit)
+              payload = path.read_bytes()
+              require(len(payload) <= limit)
+              record = git_evidence('ls-tree', '-z', 'HEAD', '--', filename)
+              require(record.endswith(b'\0') and record.count(b'\0') == 1)
+              metadata, tracked_path = record[:-1].split(b'\t', 1)
+              mode, kind, identity = metadata.decode('ascii').split()
+              require(tracked_path == filename.encode('utf-8') and mode in ('100644', '100755') and kind == 'blob')
+              blob = hashlib.sha1(b'blob ' + str(len(payload)).encode('ascii') + b'\0' + payload).hexdigest()
+              require(blob == identity and git_evidence('cat-file', '-t', identity) == b'blob\n')
+              return payload, identity
+
+          def verified_preservation_fields(filename):
+              # Only this bounded legacy capsule schema is recognized. No filename or
+              # field-name allowlist can accept an unverified digest or commit identifier.
+              capsule = safe_path(filename)
+              require(len(capsule.parts) == 4 and capsule.parts[0] == 'migration-preservation')
+              require(capsule.name == 'PRESERVATION.json')
+              raw, _ = tracked_bytes(filename, 1024 * 1024)
+              manifest = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+              schema(manifest, 'source_repo machine created_utc archives source_checkouts excluded scope restoration qualification privacy')
+              for key in ('source_repo', 'machine', 'created_utc', 'scope', 'restoration', 'qualification', 'privacy'):
+                  text_field(manifest[key])
+              require(manifest['source_repo'] == os.environ.get('GITHUB_REPOSITORY'))
+              require(manifest['machine'] == capsule.parts[1])
+              require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', manifest['machine']))
+              datetime.strptime(capsule.parts[2], '%Y%m%dT%H%M%SZ')
+              require(datetime.fromisoformat(manifest['created_utc']).utcoffset().total_seconds() == 0)
+              require(manifest['excluded'] == [])
+              require(isinstance(manifest['archives'], list) and 1 <= len(manifest['archives']) <= 32)
+              require(isinstance(manifest['source_checkouts'], list) and 1 <= len(manifest['source_checkouts']) <= 128)
+              canonical = json.dumps(manifest, indent=2)
+              require(raw.decode('utf-8') in (canonical, canonical + '\n'))
+              marked = json.loads(canonical)
+              verified = {}
+
+              def mark(record, key):
+                  marker = '__verified_preservation_checksum_' + str(len(verified)) + '__'
+                  require(marker not in canonical)
+                  verified[marker] = record[key]
+                  record[key] = marker
+
+              checkouts = manifest['source_checkouts']
+              for index, checkout in enumerate(checkouts):
+                  schema(checkout, 'path head branch')
+                  text_field(checkout['path'])
+                  text_field(checkout['branch'], 255)
+                  require(PureWindowsPath(checkout['path']).is_absolute() and '..' not in PureWindowsPath(checkout['path']).parts)
+                  require(isinstance(checkout['head'], str) and re.fullmatch(r'[a-f0-9]{40}', checkout['head']))
+                  require(git_evidence('cat-file', '-t', checkout['head']) == b'commit\n')
+                  git_evidence('merge-base', '--is-ancestor', checkout['head'], 'HEAD')
+                  mark(marked['source_checkouts'][index], 'head')
+
+              archive_paths = set()
+              for index, archive in enumerate(manifest['archives']):
+                  schema(archive, 'name bytes source_files sha256 git_blob_sha remote_blob_sha remote_sha256_verified remote_source_hashes_verified repository_path')
+                  require(safe_path(archive['name']).name == archive['name'] and archive['name'].endswith('.zip'))
+                  filename_in_repo = str(capsule.parent / archive['name'])
+                  require(archive['repository_path'] == filename_in_repo and filename_in_repo not in archive_paths)
+                  archive_paths.add(filename_in_repo)
+                  require(type(archive['bytes']) is int and 0 < archive['bytes'] <= 64 * 1024 * 1024)
+                  require(type(archive['source_files']) is int and 1 <= archive['source_files'] <= 255)
+                  require(archive['remote_sha256_verified'] is True and archive['remote_source_hashes_verified'] is True)
+                  payload, blob = tracked_bytes(filename_in_repo, 64 * 1024 * 1024)
+                  require(len(payload) == archive['bytes'] and hashlib.sha256(payload).hexdigest() == archive['sha256'])
+                  require(blob == archive['git_blob_sha'] == archive['remote_blob_sha'])
+                  with ZipFile(io.BytesIO(payload)) as handle:
+                      entries = handle.infolist()
+                      require(len(entries) == archive['source_files'] + 1)
+                      names = [entry.filename for entry in entries]
+                      require(len(set(names)) == len(names) and 'source-manifest.json' in names)
+                      require(sum(entry.file_size for entry in entries) <= 128 * 1024 * 1024)
+                      for entry in entries:
+                          safe_path(entry.filename)
+                          require(not entry.is_dir() and not entry.flag_bits & 1)
+                          require(entry.external_attr >> 16 & 0o170000 in (0, 0o100000))
+                          require(entry.compress_type in (ZIP_STORED, ZIP_DEFLATED) and entry.file_size <= 8 * 1024 * 1024)
+                      require(handle.getinfo('source-manifest.json').file_size <= 1024 * 1024)
+                      source_manifest = json.loads(
+                          handle.read('source-manifest.json'), object_pairs_hook=unique_object, parse_constant=invalid_constant,
+                      )
+                      schema(source_manifest, 'files note')
+                      text_field(source_manifest['note'])
+                      require(isinstance(source_manifest['files'], list) and len(source_manifest['files']) == archive['source_files'])
+                      source_paths = set()
+                      for source in source_manifest['files']:
+                          schema(source, 'source archive_path bytes sha256 status original_head original_branch scanner')
+                          for key in ('source', 'status', 'original_branch', 'scanner'):
+                              text_field(source[key])
+                          require('..' not in PureWindowsPath(source['source']).parts)
+                          require(any(
+                              source['original_head'] == checkout['head'] and source['original_branch'] == checkout['branch']
+                              and PureWindowsPath(source['source']).is_relative_to(PureWindowsPath(checkout['path']))
+                              for checkout in checkouts
+                          ))
+                          source_path = str(safe_path(source['archive_path']))
+                          require(source_path != 'source-manifest.json' and source_path not in source_paths)
+                          source_paths.add(source_path)
+                          require(type(source['bytes']) is int and 0 <= source['bytes'] <= 8 * 1024 * 1024)
+                          content = handle.read(source_path)
+                          require(len(content) == source['bytes'] and hashlib.sha256(content).hexdigest() == source['sha256'])
+                      require(set(names) == source_paths | {'source-manifest.json'} and handle.testzip() is None)
+                  for key in ('sha256', 'git_blob_sha', 'remote_blob_sha'):
+                      mark(marked['archives'][index], key)
+
+              # Canonical formatting gives each verified field an unambiguous source line.
+              # Matching the detector's secret hash prevents a second token on that line
+              # or the same string in another property from inheriting this exemption.
+              accepted = set()
+              located = 0
+              values = list(verified.values())
+              occurrence_counts = {value: canonical.count(value) for value in set(values)}
+              for line_number, line in enumerate(json.dumps(marked, indent=2).splitlines(), 1):
+                  for marker, value in verified.items():
+                      if json.dumps(marker) in line:
+                          located += 1
+                          # detect-secrets deduplicates equal tokens within a file.
+                          # A copy outside the verified fields must remain a finding.
+                          if occurrence_counts[value] == values.count(value):
+                              accepted.add((line_number, hashlib.sha1(value.encode('utf-8')).hexdigest()))
+              require(located == len(verified))
+              return accepted
 
           try:
               # Never expose exception messages, scanner stderr, hashes, or values.
@@ -235,6 +392,7 @@ jobs:
                   if not isinstance(data['results'], dict):
                       raise ValueError('Invalid scan results')
                   total = 0
+                  preservation_fields = {}
                   for filename, findings in data['results'].items():
                       if not isinstance(filename, str) or not filename or '\x00' in filename:
                           raise ValueError('Invalid filename')
@@ -253,6 +411,13 @@ jobs:
                               raise ValueError('Invalid finding verification')
                           if not isinstance(finding['hashed_secret'], str) or not re.fullmatch(r'[a-f0-9]{40}', finding['hashed_secret']):
                               raise ValueError('Invalid finding hash')
+                          if finding['type'] == 'Hex High Entropy String' and not finding['is_verified'] and re.fullmatch(
+                              r'migration-preservation/[^/]+/[^/]+/PRESERVATION\.json', filename,
+                          ):
+                              if filename not in preservation_fields:
+                                  preservation_fields[filename] = verified_preservation_fields(filename)
+                              if (finding['line_number'], finding['hashed_secret']) in preservation_fields[filename]:
+                                  continue
                           total += 1
                   count = total
                   status = 'findings' if count else 'clean'
