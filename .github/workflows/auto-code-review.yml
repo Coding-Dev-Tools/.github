@@ -72,7 +72,8 @@ defaults:
 jobs:
   review:
     name: Automated code review
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
 
     steps:
       # ── Checkout ──────────────────────────────────────────────

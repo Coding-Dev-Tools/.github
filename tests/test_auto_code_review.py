@@ -232,16 +232,17 @@ class InlineWorkflowTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
-        invalid = (
-            WORKFLOWS[0]
-            .read_text(encoding="utf-8")
-            .replace(
-                "    runs-on: ubuntu-latest\n",
-                "    runs-on: ubuntu-latest\n"
-                "    env:\n"
-                "      RUFF_CACHE_DIR: ${{ runner.temp }}/ruff-cache\n",
-                1,
-            )
+        source = WORKFLOWS[0].read_text(encoding="utf-8")
+        runner = self.workflows[0]["jobs"]["review"]["runs-on"]
+        runner_line = f"    runs-on: {runner}\n"
+        # Keep this negative fixture effective when the runner label changes.
+        self.assertEqual(source.count(runner_line), 1)
+        invalid = source.replace(
+            runner_line,
+            runner_line
+            + "    env:\n"
+            + "      RUFF_CACHE_DIR: ${{ runner.temp }}/ruff-cache\n",
+            1,
         )
         rejected = subprocess.run(
             command + ["-"],
